@@ -117,10 +117,33 @@ def main():
 
     # Launch GUI wizard
     try:
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QStyleFactory
+        from PySide6.QtGui import QPalette
+        from PySide6.QtCore import Qt
         from ui.wizard import TobbesWizard
 
         app = QApplication(sys.argv)
+
+        # Force Windows native light theme (not dark mode)
+        app.setStyle(QStyleFactory.create("Fusion"))  # Cross-platform consistent style
+
+        # Set light palette explicitly
+        palette = QPalette()
+        palette.setColor(QPalette.Window, Qt.white)
+        palette.setColor(QPalette.WindowText, Qt.black)
+        palette.setColor(QPalette.Base, Qt.white)
+        palette.setColor(QPalette.AlternateBase, Qt.lightGray)
+        palette.setColor(QPalette.ToolTipBase, Qt.white)
+        palette.setColor(QPalette.ToolTipText, Qt.black)
+        palette.setColor(QPalette.Text, Qt.black)
+        palette.setColor(QPalette.Button, Qt.white)
+        palette.setColor(QPalette.ButtonText, Qt.black)
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Link, Qt.blue)
+        palette.setColor(QPalette.Highlight, Qt.blue)
+        palette.setColor(QPalette.HighlightedText, Qt.white)
+        app.setPalette(palette)
+
         wizard = TobbesWizard()
         wizard.show()
         sys.exit(app.exec())

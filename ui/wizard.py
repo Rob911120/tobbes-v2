@@ -99,9 +99,8 @@ class TobbesWizard(QWizard):
             self.context.settings.window_height,
         )
 
-        # Apply stylesheet
-        from ui.styles import MAIN_STYLESHEET
-        self.setStyleSheet(MAIN_STYLESHEET)
+        # Use Windows native theme (light mode)
+        # No custom stylesheet - rely on system theme for clean Windows look
 
     def _add_pages(self):
         """Add wizard pages."""
