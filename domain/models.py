@@ -19,10 +19,12 @@ class Project:
     A project contains articles, inventory, and certificates.
     """
 
-    project_name: str
-    order_number: str
-    customer: str
+    project_name: str  # Artikelbenämning (e.g., "Gasturbinmotor")
+    order_number: str  # Ordernummer (e.g., "TO-12345")
+    customer: str  # Kund (e.g., "Volvo")
     created_by: str
+    purchase_order_number: Optional[str] = None  # Beställningsnummer (e.g., "BI-2024-001")
+    project_type: str = "Doc"  # Typ: "Doc" eller "Ej Doc"
     description: Optional[str] = None
     id: Optional[int] = None
     created_at: Optional[datetime] = None
@@ -36,6 +38,8 @@ class Project:
             raise ValueError("order_number cannot be empty")
         if not self.customer:
             raise ValueError("customer cannot be empty")
+        if self.project_type not in ["Doc", "Ej Doc"]:
+            raise ValueError("project_type must be 'Doc' or 'Ej Doc'")
 
 
 @dataclass

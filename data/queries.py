@@ -11,18 +11,21 @@ throughout the codebase. This makes it easier to:
 # ==================== Project Queries ====================
 
 INSERT_PROJECT = """
-    INSERT INTO projects (project_name, order_number, customer, created_by, description)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO projects (project_name, order_number, customer, created_by, description,
+                         purchase_order_number, project_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
 """
 
 UPDATE_PROJECT = """
     UPDATE projects
-    SET project_name = ?, order_number = ?, customer = ?, description = ?
+    SET project_name = ?, order_number = ?, customer = ?, description = ?,
+        purchase_order_number = ?, project_type = ?
     WHERE id = ?
 """
 
 SELECT_PROJECT_BY_ID = """
     SELECT id, project_name, order_number, customer, description,
+           purchase_order_number, project_type,
            created_at, updated_at, created_by
     FROM projects
     WHERE id = ?
@@ -30,6 +33,7 @@ SELECT_PROJECT_BY_ID = """
 
 SELECT_ALL_PROJECTS = """
     SELECT id, project_name, order_number, customer, description,
+           purchase_order_number, project_type,
            created_at, updated_at, created_by
     FROM projects
     ORDER BY {order_by}
@@ -214,4 +218,16 @@ DELETE_GLOBAL_CERTIFICATE_TYPE = """
 DELETE_PROJECT_CERTIFICATE_TYPE = """
     DELETE FROM project_certificate_types
     WHERE project_id = ? AND type_name = ?
+"""
+
+# ==================== Statistics Queries ====================
+
+SELECT_PROJECT_STATISTICS = """
+    SELECT
+        COUNT(DISTINCT pa.article_number) AS total_articles,
+        COUNT(DISTINCT c.article_number) AS verified_articles
+    FROM project_articles pa
+    LEFT JOIN certificates c ON c.project_id = pa.project_id
+                             AND c.article_number = pa.article_number
+    WHERE pa.project_id = ?
 """

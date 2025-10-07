@@ -1,17 +1,19 @@
 """
 Start Page for Tobbes v2 Wizard.
 
-Project selection and creation.
+Recreates v1 UI with inline project creation and 7-column project list.
 """
 
 import logging
+import subprocess
+from pathlib import Path
 from datetime import datetime
 
 try:
     from PySide6.QtWidgets import (
-        QWizardPage, QVBoxLayout, QHBoxLayout, QPushButton,
-        QLabel, QTableWidget, QTableWidgetItem, QMessageBox,
-        QDialog, QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox
+        QWizardPage, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
+        QLabel, QTableWidget, QTableWidgetItem, QMessageBox, QLineEdit,
+        QComboBox, QGroupBox, QFrame
     )
     from PySide6.QtCore import Qt
     PYSIDE6_AVAILABLE = True
@@ -29,11 +31,11 @@ class StartPage(QWizardPage):
     """
     Start page - Project selection and creation.
 
-    Features:
-    - List existing projects
-    - Create new project
-    - Open existing project
-    - Delete project
+    Matches Tobbes v1 UI:
+    - Welcome section with bullet points
+    - Inline project creation form (not dialog)
+    - 7-column project table with verification status
+    - Multiple action buttons
     """
 
     def __init__(self, wizard):
@@ -42,273 +44,361 @@ class StartPage(QWizardPage):
 
         self.wizard_ref = wizard
         self.selected_project_id = None
+        self.sort_ascending = True  # For A-Z sorting toggle
 
         self._setup_ui()
         self._load_projects()
 
     def _setup_ui(self):
-        """Setup UI components."""
-        self.setTitle("Välkommen till Tobbes - Spårbarhetsguiden")
-        self.setSubTitle("Välj ett befintligt projekt eller skapa ett nytt.")
+        """Setup UI components matching v1 layout."""
+        self.setTitle("Tobbes - Spårbarhetsguiden")
 
         layout = QVBoxLayout()
 
-        # Header
-        header = QLabel("Mina Projekt")
-        header.setProperty("class", "header")
-        layout.addWidget(header)
+        # Welcome section with HTML bullets
+        welcome_html = """
+        <h3>Välkommen till Spårbarhetsguiden</h3>
+        <p>Denna guide hjälper dig att:</p>
+        <ul style="margin-left: 20px;">
+            <li>Importera nivålistor och lagerloggar</li>
+            <li>Matcha artiklar med chargenummer</li>
+            <li>Bifoga certifikat och intyg</li>
+            <li>Generera färdiga PDF-rapporter</li>
+        </ul>
+        """
+        welcome_label = QLabel(welcome_html)
+        welcome_label.setWordWrap(True)
+        layout.addWidget(welcome_label)
 
-        # Projects table
+        # Separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+
+        # === PROJECT CREATION GROUP ===
+        create_group = QGroupBox("Skapa nytt projekt")
+        create_layout = QGridLayout()
+
+        # Row 0: Artikelbenämning (project_name)
+        create_layout.addWidget(QLabel("Artikelbenämning:"), 0, 0)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("T.ex. 'Stålkonstruktion'")
+        self.name_edit.returnPressed.connect(self._create_project_from_form)
+        create_layout.addWidget(self.name_edit, 0, 1, 1, 3)
+
+        # Row 1: Ordernummer
+        create_layout.addWidget(QLabel("Ordernummer:"), 1, 0)
+        self.order_edit = QLineEdit()
+        self.order_edit.setPlaceholderText("T.ex. 'TO-2024-001'")
+        self.order_edit.returnPressed.connect(self._create_project_from_form)
+        create_layout.addWidget(self.order_edit, 1, 1, 1, 3)
+
+        # Row 2: Beställningsnummer (NEW)
+        create_layout.addWidget(QLabel("Beställningsnummer:"), 2, 0)
+        self.purchase_order_edit = QLineEdit()
+        self.purchase_order_edit.setPlaceholderText("T.ex. 'BI-2024-001' (valfritt)")
+        self.purchase_order_edit.returnPressed.connect(self._create_project_from_form)
+        create_layout.addWidget(self.purchase_order_edit, 2, 1, 1, 3)
+
+        # Row 3: Typ + Kund (on same row)
+        create_layout.addWidget(QLabel("Typ:"), 3, 0)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Doc", "Ej Doc"])
+        create_layout.addWidget(self.type_combo, 3, 1)
+
+        create_layout.addWidget(QLabel("Kund:"), 3, 2)
+        self.customer_edit = QLineEdit()
+        self.customer_edit.setPlaceholderText("T.ex. 'Volvo AB'")
+        self.customer_edit.returnPressed.connect(self._create_project_from_form)
+        create_layout.addWidget(self.customer_edit, 3, 3)
+
+        # Row 4: Create button
+        self.btn_create = QPushButton("Skapa projekt")
+        self.btn_create.clicked.connect(self._create_project_from_form)
+        self.btn_create.setDefault(True)
+        create_layout.addWidget(self.btn_create, 4, 0, 1, 4)
+
+        create_group.setLayout(create_layout)
+        layout.addWidget(create_group)
+
+        # === RECENT PROJECTS GROUP ===
+        projects_group = QGroupBox("Senaste projekt")
+        projects_layout = QVBoxLayout()
+
+        # Projects table - 7 columns
         self.projects_table = QTableWidget()
-        self.projects_table.setColumnCount(4)
+        self.projects_table.setColumnCount(7)
         self.projects_table.setHorizontalHeaderLabels([
-            "Projektnamn", "Ordernummer", "Kund", "Senast uppdaterad"
+            "Beställningsnr", "Ordernr", "Artikelbenämning",
+            "Typ", "Kund", "Verifierade", "Senast ändrad"
         ])
         self.projects_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.projects_table.setSelectionMode(QTableWidget.SingleSelection)
         self.projects_table.doubleClicked.connect(self._open_selected_project)
-        layout.addWidget(self.projects_table)
+        self.projects_table.itemSelectionChanged.connect(self._on_selection_changed)
+        projects_layout.addWidget(self.projects_table)
 
-        # Buttons
+        # Action buttons
         button_layout = QHBoxLayout()
 
-        self.btn_new = QPushButton("Nytt Projekt")
-        self.btn_new.clicked.connect(self._create_new_project)
-        button_layout.addWidget(self.btn_new)
+        self.btn_update = QPushButton("Uppdatera projekt")
+        self.btn_update.clicked.connect(self._update_project)
+        self.btn_update.setEnabled(False)
+        button_layout.addWidget(self.btn_update)
 
-        self.btn_open = QPushButton("Öppna")
-        self.btn_open.clicked.connect(self._open_selected_project)
-        self.btn_open.setEnabled(False)
-        button_layout.addWidget(self.btn_open)
+        self.btn_cert_types = QPushButton("Redigera intygstyper")
+        self.btn_cert_types.clicked.connect(self._edit_certificate_types)
+        button_layout.addWidget(self.btn_cert_types)
 
-        self.btn_delete = QPushButton("Radera")
-        self.btn_delete.clicked.connect(self._delete_selected_project)
-        self.btn_delete.setEnabled(False)
-        button_layout.addWidget(self.btn_delete)
+        self.btn_sort = QPushButton("Sortera A-Z")
+        self.btn_sort.clicked.connect(self._toggle_sort)
+        button_layout.addWidget(self.btn_sort)
+
+        self.btn_open_folder = QPushButton("Öppna projektmapp")
+        self.btn_open_folder.clicked.connect(self._open_project_folder)
+        self.btn_open_folder.setEnabled(False)
+        button_layout.addWidget(self.btn_open_folder)
 
         button_layout.addStretch()
-        layout.addLayout(button_layout)
+        projects_layout.addLayout(button_layout)
+
+        projects_group.setLayout(projects_layout)
+        layout.addWidget(projects_group)
 
         self.setLayout(layout)
 
-        # Connect selection changed
-        self.projects_table.itemSelectionChanged.connect(self._on_selection_changed)
-
     def _load_projects(self):
-        """Load projects from database."""
+        """Load projects from database with statistics."""
         try:
             db = self.wizard_ref.context.database
-            projects = db.list_projects(limit=100, order_by="updated_at DESC")
+
+            # Determine sort order
+            order_by = "project_name ASC" if self.sort_ascending else "updated_at DESC"
+            projects = db.list_projects(limit=100, order_by=order_by)
 
             self.projects_table.setRowCount(len(projects))
 
             for row, project in enumerate(projects):
-                # Project name
-                name_item = QTableWidgetItem(project["project_name"])
-                name_item.setData(Qt.UserRole, project["id"])  # Store project ID
-                self.projects_table.setItem(row, 0, name_item)
+                # Get statistics for verification count
+                try:
+                    stats = db.get_project_statistics(project["id"])
+                    verified_text = f"{stats['verified_articles']}/{stats['total_articles']}"
+                except Exception as e:
+                    logger.warning(f"Could not get stats for project {project['id']}: {e}")
+                    verified_text = "0/0"
 
-                # Order number
+                # Column 0: Beställningsnummer
+                purchase_order = project.get("purchase_order_number") or ""
+                item_0 = QTableWidgetItem(purchase_order)
+                item_0.setData(Qt.UserRole, project["id"])  # Store project ID in first column
+                self.projects_table.setItem(row, 0, item_0)
+
+                # Column 1: Ordernummer
                 self.projects_table.setItem(row, 1, QTableWidgetItem(project["order_number"]))
 
-                # Customer
-                self.projects_table.setItem(row, 2, QTableWidgetItem(project["customer"]))
+                # Column 2: Artikelbenämning
+                self.projects_table.setItem(row, 2, QTableWidgetItem(project["project_name"]))
 
-                # Updated at
+                # Column 3: Typ
+                project_type = project.get("project_type", "Doc")
+                self.projects_table.setItem(row, 3, QTableWidgetItem(project_type))
+
+                # Column 4: Kund
+                self.projects_table.setItem(row, 4, QTableWidgetItem(project["customer"]))
+
+                # Column 5: Verifierade (X/Y)
+                self.projects_table.setItem(row, 5, QTableWidgetItem(verified_text))
+
+                # Column 6: Senast ändrad
                 updated = project.get("updated_at", project["created_at"])
-                self.projects_table.setItem(row, 3, QTableWidgetItem(updated))
+                # Format datetime if it's a string
+                if isinstance(updated, str):
+                    try:
+                        dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+                        updated = dt.strftime("%Y-%m-%d %H:%M")
+                    except:
+                        pass  # Keep as-is if parsing fails
+                self.projects_table.setItem(row, 6, QTableWidgetItem(str(updated)))
 
             self.projects_table.resizeColumnsToContents()
-
             logger.info(f"Loaded {len(projects)} projects")
 
         except Exception as e:
             logger.exception("Failed to load projects")
-            QMessageBox.critical(
-                self,
-                "Fel",
-                f"Kunde inte ladda projekt: {e}"
-            )
+            QMessageBox.critical(self, "Fel", f"Kunde inte ladda projekt: {e}")
 
     def _on_selection_changed(self):
         """Handle table selection change."""
         has_selection = len(self.projects_table.selectedItems()) > 0
-        self.btn_open.setEnabled(has_selection)
-        self.btn_delete.setEnabled(has_selection)
+        self.btn_update.setEnabled(has_selection)
+        self.btn_open_folder.setEnabled(has_selection)
 
-    def _create_new_project(self):
-        """Show dialog to create new project."""
-        dialog = NewProjectDialog(self)
+    def _create_project_from_form(self):
+        """Create project from inline form (not dialog)."""
+        try:
+            # Get values from form
+            project_name = self.name_edit.text().strip()
+            order_number = self.order_edit.text().strip()
+            purchase_order_number = self.purchase_order_edit.text().strip() or None
+            project_type = self.type_combo.currentText()
+            customer = self.customer_edit.text().strip()
 
-        if dialog.exec() == QDialog.Accepted:
-            try:
-                db = self.wizard_ref.context.database
+            # Validate
+            validate_project_name(project_name)
+            validate_order_number(order_number)
+            if not customer:
+                raise ValidationError("Kundnamn krävs")
 
-                # Create project
-                project_id = db.save_project(
-                    project_name=dialog.project_name,
-                    order_number=dialog.order_number,
-                    customer=dialog.customer,
-                    created_by=self.wizard_ref.context.user_name,
-                    description=dialog.description,
-                )
+            # Create project
+            db = self.wizard_ref.context.database
+            project_id = db.save_project(
+                project_name=project_name,
+                order_number=order_number,
+                customer=customer,
+                created_by=self.wizard_ref.context.user_name,
+                purchase_order_number=purchase_order_number,
+                project_type=project_type,
+            )
 
-                logger.info(f"Created new project: id={project_id}, name={dialog.project_name}")
+            logger.info(f"Created project: id={project_id}, name={project_name}")
 
-                # Reload projects
-                self._load_projects()
+            # Clear form
+            self.name_edit.clear()
+            self.order_edit.clear()
+            self.purchase_order_edit.clear()
+            self.customer_edit.clear()
+            self.type_combo.setCurrentIndex(0)  # Reset to "Doc"
 
-                # Select the new project
-                for row in range(self.projects_table.rowCount()):
-                    item = self.projects_table.item(row, 0)
-                    if item and item.data(Qt.UserRole) == project_id:
-                        self.projects_table.selectRow(row)
-                        break
+            # Reload projects
+            self._load_projects()
 
-                QMessageBox.information(
-                    self,
-                    "Projekt skapat",
-                    f"Projektet '{dialog.project_name}' har skapats."
-                )
+            # Select the new project
+            for row in range(self.projects_table.rowCount()):
+                item = self.projects_table.item(row, 0)
+                if item and item.data(Qt.UserRole) == project_id:
+                    self.projects_table.selectRow(row)
+                    break
 
-            except (ValidationError, DatabaseError) as e:
-                logger.error(f"Failed to create project: {e}")
-                QMessageBox.warning(self, "Fel", str(e))
+            QMessageBox.information(
+                self,
+                "Projekt skapat",
+                f"Projektet '{project_name}' har skapats."
+            )
 
-            except Exception as e:
-                logger.exception("Unexpected error creating project")
-                QMessageBox.critical(self, "Fel", f"Oväntat fel: {e}")
+        except (ValidationError, DatabaseError) as e:
+            logger.error(f"Failed to create project: {e}")
+            QMessageBox.warning(self, "Fel", str(e))
+
+            # Add red border to invalid fields (v1 feature)
+            if "project_name" in str(e).lower():
+                self.name_edit.setStyleSheet("border: 1px solid red;")
+            if "order" in str(e).lower():
+                self.order_edit.setStyleSheet("border: 1px solid red;")
+            if "kund" in str(e).lower():
+                self.customer_edit.setStyleSheet("border: 1px solid red;")
+
+        except Exception as e:
+            logger.exception("Unexpected error creating project")
+            QMessageBox.critical(self, "Fel", f"Oväntat fel: {e}")
 
     def _open_selected_project(self):
         """Open selected project."""
         selected = self.projects_table.selectedItems()
-
         if not selected:
             return
 
-        # Get project ID from first column
         row = selected[0].row()
         project_id_item = self.projects_table.item(row, 0)
         project_id = project_id_item.data(Qt.UserRole)
-        project_name = project_id_item.text()
+        project_name = self.projects_table.item(row, 2).text()  # Column 2 is name
 
         # Set current project in wizard context
         self.wizard_ref.set_current_project(project_id, project_name)
-
         logger.info(f"Opened project: id={project_id}, name={project_name}")
 
         # Move to next page
         self.wizard_ref.next()
 
-    def _delete_selected_project(self):
-        """Delete selected project after confirmation."""
+    def _update_project(self):
+        """Update selected project (placeholder for now)."""
         selected = self.projects_table.selectedItems()
-
         if not selected:
             return
 
         row = selected[0].row()
-        project_name = self.projects_table.item(row, 0).text()
-        project_id = self.projects_table.item(row, 0).data(Qt.UserRole)
+        project_name = self.projects_table.item(row, 2).text()
 
-        # Confirmation dialog
-        reply = QMessageBox.question(
+        # TODO: Implement UpdatePage navigation
+        QMessageBox.information(
             self,
-            "Bekräfta radering",
-            f"Är du säker på att du vill radera projektet '{project_name}'?\n\n"
-            f"Detta kommer radera alla artiklar, certifikat och rapporter.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            "Uppdatera projekt",
+            f"Uppdateringsfunktion för '{project_name}' kommer snart.\n\n"
+            "Detta öppnar UpdatePage där du kan importera nya versioner av "
+            "nivålistor och lagerloggar."
         )
 
-        if reply == QMessageBox.Yes:
-            try:
-                db = self.wizard_ref.context.database
-                db.delete_project(project_id)
+    def _edit_certificate_types(self):
+        """Edit global certificate types (placeholder)."""
+        # TODO: Implement CertificateTypesDialog
+        QMessageBox.information(
+            self,
+            "Redigera intygstyper",
+            "Dialog för att hantera certifikattyper kommer snart.\n\n"
+            "Här kan du lägga till eller ta bort globala certifikattyper "
+            "som används i alla projekt."
+        )
 
-                logger.info(f"Deleted project: id={project_id}, name={project_name}")
+    def _toggle_sort(self):
+        """Toggle sorting between A-Z and updated_at."""
+        self.sort_ascending = not self.sort_ascending
 
-                # Reload projects
-                self._load_projects()
+        # Update button text
+        if self.sort_ascending:
+            self.btn_sort.setText("Sortera A-Z")
+        else:
+            self.btn_sort.setText("Sortera efter datum")
 
-                QMessageBox.information(
-                    self,
-                    "Projekt raderat",
-                    f"Projektet '{project_name}' har raderats."
-                )
+        # Reload with new sort
+        self._load_projects()
 
-            except Exception as e:
-                logger.exception("Failed to delete project")
-                QMessageBox.critical(self, "Fel", f"Kunde inte radera projekt: {e}")
+    def _open_project_folder(self):
+        """Open project folder in file explorer."""
+        selected = self.projects_table.selectedItems()
+        if not selected:
+            return
 
+        row = selected[0].row()
+        project_id = self.projects_table.item(row, 0).data(Qt.UserRole)
+        project_name = self.projects_table.item(row, 2).text()
 
-class NewProjectDialog(QDialog):
-    """Dialog for creating a new project."""
-
-    def __init__(self, parent=None):
-        """Initialize dialog."""
-        super().__init__(parent)
-
-        self.project_name = ""
-        self.order_number = ""
-        self.customer = ""
-        self.description = ""
-
-        self._setup_ui()
-
-    def _setup_ui(self):
-        """Setup UI components."""
-        self.setWindowTitle("Nytt Projekt")
-        self.setModal(True)
-
-        layout = QFormLayout()
-
-        # Project name
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("T.ex. 'Stålkonstruktion Göteborg'")
-        layout.addRow("Projektnamn*:", self.name_edit)
-
-        # Order number
-        self.order_edit = QLineEdit()
-        self.order_edit.setPlaceholderText("T.ex. 'TO-2024-001'")
-        layout.addRow("Ordernummer*:", self.order_edit)
-
-        # Customer
-        self.customer_edit = QLineEdit()
-        self.customer_edit.setPlaceholderText("T.ex. 'Volvo AB'")
-        layout.addRow("Kund*:", self.customer_edit)
-
-        # Description (optional)
-        self.desc_edit = QTextEdit()
-        self.desc_edit.setPlaceholderText("Beskrivning av projektet (valfritt)")
-        self.desc_edit.setMaximumHeight(100)
-        layout.addRow("Beskrivning:", self.desc_edit)
-
-        # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
-
-        self.setLayout(layout)
-
-    def _accept(self):
-        """Validate and accept."""
+        # Construct project folder path
+        # Assuming projects are stored in settings.projects_root / project_name
         try:
-            # Get values
-            self.project_name = self.name_edit.text().strip()
-            self.order_number = self.order_edit.text().strip()
-            self.customer = self.customer_edit.text().strip()
-            self.description = self.desc_edit.toPlainText().strip()
+            settings = self.wizard_ref.context.settings
+            project_folder = Path(settings.projects_root) / project_name
 
-            # Validate
-            validate_project_name(self.project_name)
-            validate_order_number(self.order_number)
+            if not project_folder.exists():
+                project_folder.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created project folder: {project_folder}")
 
-            if not self.customer:
-                raise ValidationError("Kundnamn krävs")
+            # Open folder in file explorer (cross-platform)
+            import platform
+            system = platform.system()
 
-            self.accept()
+            if system == "Windows":
+                subprocess.run(["explorer", str(project_folder)])
+            elif system == "Darwin":  # macOS
+                subprocess.run(["open", str(project_folder)])
+            else:  # Linux
+                subprocess.run(["xdg-open", str(project_folder)])
 
-        except ValidationError as e:
-            QMessageBox.warning(self, "Valideringsfel", str(e))
+            logger.info(f"Opened project folder: {project_folder}")
+
+        except Exception as e:
+            logger.exception("Failed to open project folder")
+            QMessageBox.warning(
+                self,
+                "Fel",
+                f"Kunde inte öppna projektmapp: {e}"
+            )

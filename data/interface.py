@@ -32,6 +32,8 @@ class DatabaseInterface(ABC):
         order_number: str,
         customer: str,
         created_by: str,
+        purchase_order_number: Optional[str] = None,
+        project_type: str = "Doc",
         description: Optional[str] = None,
         project_id: Optional[int] = None,
     ) -> int:
@@ -39,10 +41,12 @@ class DatabaseInterface(ABC):
         Save or update a project.
 
         Args:
-            project_name: Name of the project
+            project_name: Name of the project (Artikelbenämning)
             order_number: Order number (e.g., "TO-12345")
             customer: Customer name
             created_by: Username of creator
+            purchase_order_number: Purchase order number (Beställningsnummer)
+            project_type: Project type ("Doc" or "Ej Doc")
             description: Optional project description
             project_id: If provided, update existing project; otherwise create new
 
@@ -498,6 +502,23 @@ class DatabaseInterface(ABC):
 
         Returns:
             bool: True if deleted, False if not found
+        """
+        pass
+
+    # ==================== Statistics Operations ====================
+
+    @abstractmethod
+    def get_project_statistics(self, project_id: int) -> Dict[str, int]:
+        """
+        Get statistics for a project.
+
+        Args:
+            project_id: The project ID
+
+        Returns:
+            Dict containing:
+            - total_articles: Total number of articles in project
+            - verified_articles: Number of articles with at least one certificate
         """
         pass
 

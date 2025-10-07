@@ -77,6 +77,8 @@ class SQLiteDatabase(DatabaseInterface):
         order_number: str,
         customer: str,
         created_by: str,
+        purchase_order_number: Optional[str] = None,
+        project_type: str = "Doc",
         description: Optional[str] = None,
         project_id: Optional[int] = None,
     ) -> int:
@@ -88,7 +90,8 @@ class SQLiteDatabase(DatabaseInterface):
                 # Update existing
                 cursor.execute(
                     Q.UPDATE_PROJECT,
-                    (project_name, order_number, customer, description, project_id),
+                    (project_name, order_number, customer, description,
+                     purchase_order_number, project_type, project_id),
                 )
                 self.conn.commit()
                 return project_id
@@ -96,7 +99,8 @@ class SQLiteDatabase(DatabaseInterface):
                 # Insert new
                 cursor.execute(
                     Q.INSERT_PROJECT,
-                    (project_name, order_number, customer, created_by, description),
+                    (project_name, order_number, customer, created_by, description,
+                     purchase_order_number, project_type),
                 )
                 self.conn.commit()
                 return cursor.lastrowid
@@ -458,6 +462,21 @@ class SQLiteDatabase(DatabaseInterface):
 
         self.conn.commit()
         return cursor.rowcount > 0
+
+    # ==================== Statistics Operations ====================
+
+    def get_project_statistics(self, project_id: int) -> Dict[str, int]:
+        """Get statistics for a project."""
+        cursor = self.conn.cursor()
+        cursor.execute(Q.SELECT_PROJECT_STATISTICS, (project_id,))
+        row = cursor.fetchone()
+
+        if row:
+            return {
+                "total_articles": row["total_articles"] or 0,
+                "verified_articles": row["verified_articles"] or 0,
+            }
+        return {"total_articles": 0, "verified_articles": 0}
 
     # ==================== Utility Operations ====================
 
