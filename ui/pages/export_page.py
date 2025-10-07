@@ -335,6 +335,16 @@ class ExportPage(QWizardPage):
                 f"Ett oväntat fel uppstod:\n\n{str(e)}"
             )
 
+    def export_report(self):
+        """
+        Export report (called by wizard button).
+
+        This is a simple wrapper around _generate_report() for consistency
+        with wizard button callback naming.
+        """
+        logger.info("export_report() triggered from wizard button")
+        self._generate_report()
+
     def isComplete(self):
         """Page is complete when articles are loaded."""
         return len(self.articles) > 0

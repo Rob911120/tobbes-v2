@@ -40,6 +40,13 @@ class TobbesWizard(QWizard):
         >>> sys.exit(app.exec())
     """
 
+    # Page IDs (matching v1 structure)
+    PAGE_START = 0
+    PAGE_IMPORT = 1
+    PAGE_PROCESS = 2
+    PAGE_EXPORT = 3
+    PAGE_UPDATE = 4
+
     def __init__(self, parent=None):
         """Initialize wizard with AppContext."""
         if not PYSIDE6_AVAILABLE:
@@ -91,7 +98,6 @@ class TobbesWizard(QWizard):
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
         self.setWizardStyle(QWizard.ModernStyle)
         self.setOption(QWizard.HaveHelpButton, False)
-        self.setOption(QWizard.NoBackButtonOnStartPage, True)
 
         # Window size
         self.resize(
@@ -102,6 +108,42 @@ class TobbesWizard(QWizard):
         # Use Windows native theme (light mode)
         # No custom stylesheet - rely on system theme for clean Windows look
 
+        # Configure custom buttons (matching v1)
+        # CustomButton1 = "Tillbaka till projektoversikt" (left)
+        # CustomButton2 = Dynamic text (right): "Bearbeta filer och fortsätt" / "Skapa rapport"
+        self.setButtonLayout([
+            QWizard.CustomButton1,
+            QWizard.Stretch,
+            QWizard.CustomButton2
+        ])
+
+        self.setButtonText(QWizard.CustomButton1, "Tillbaka till projektoversikt")
+        self.setButtonText(QWizard.CustomButton2, "Nästa")  # Will be updated per page
+
+        self.setOption(QWizard.HaveCustomButton1, True)
+        self.setOption(QWizard.HaveCustomButton2, True)
+
+        # Hide default navigation buttons
+        self.setOption(QWizard.NoDefaultButton, True)
+        if self.button(QWizard.NextButton):
+            self.button(QWizard.NextButton).hide()
+        if self.button(QWizard.BackButton):
+            self.button(QWizard.BackButton).hide()
+        if self.button(QWizard.FinishButton):
+            self.button(QWizard.FinishButton).hide()
+
+        # Connect signals
+        self.currentIdChanged.connect(self._update_page_buttons)
+
+        # Connect button actions
+        back_button = self.button(QWizard.CustomButton1)
+        if back_button:
+            back_button.clicked.connect(self._back_to_project_overview)
+
+        action_button = self.button(QWizard.CustomButton2)
+        if action_button:
+            action_button.clicked.connect(self._smart_button_action)
+
     def _add_pages(self):
         """Add wizard pages."""
         # Import pages here to avoid circular imports
@@ -111,12 +153,12 @@ class TobbesWizard(QWizard):
         from ui.pages.export_page import ExportPage
         from ui.pages.update_page import UpdatePage
 
-        # Add pages
-        self.start_page_id = self.addPage(StartPage(self))
-        self.import_page_id = self.addPage(ImportPage(self))
-        self.process_page_id = self.addPage(ProcessPage(self))
-        self.export_page_id = self.addPage(ExportPage(self))
-        self.update_page_id = self.addPage(UpdatePage(self))
+        # Add pages using consistent IDs
+        self.setPage(self.PAGE_START, StartPage(self))
+        self.setPage(self.PAGE_IMPORT, ImportPage(self))
+        self.setPage(self.PAGE_PROCESS, ProcessPage(self))
+        self.setPage(self.PAGE_EXPORT, ExportPage(self))
+        self.setPage(self.PAGE_UPDATE, UpdatePage(self))
 
         logger.info("Wizard pages added")
 
@@ -141,6 +183,115 @@ class TobbesWizard(QWizard):
         """Clear current project from context."""
         self.context = self.context.clear_project()
         logger.info("Current project cleared")
+
+    def _update_page_buttons(self, page_id: int):
+        """Update footer buttons based on current page (matching v1 logic)."""
+        back_button = self.button(QWizard.CustomButton1)
+        action_button = self.button(QWizard.CustomButton2)
+
+        if not back_button or not action_button:
+            return
+
+        if page_id == self.PAGE_START:
+            # Start page: No wizard buttons (just project list buttons)
+            back_button.setVisible(False)
+            action_button.setVisible(False)
+            logger.debug("START page: Buttons hidden")
+
+        elif page_id == self.PAGE_IMPORT:
+            # Import page: Back + "Bearbeta filer och fortsätt"
+            back_button.setVisible(True)
+            action_button.setVisible(True)
+            self.setButtonText(QWizard.CustomButton2, "Bearbeta filer och fortsätt")
+
+            # Enable only if files are imported (checked by page)
+            current_page = self.page(page_id)
+            if hasattr(current_page, 'isComplete'):
+                action_button.setEnabled(current_page.isComplete())
+            else:
+                action_button.setEnabled(False)
+            logger.debug("IMPORT page: Back + Bearbeta buttons visible")
+
+        elif page_id == self.PAGE_PROCESS:
+            # Process page: Only back button (auto-navigation after processing)
+            back_button.setVisible(True)
+            action_button.setVisible(False)
+            logger.debug("PROCESS page: Only back button visible")
+
+        elif page_id == self.PAGE_EXPORT:
+            # Export page: Back + "Skapa rapport"
+            back_button.setVisible(True)
+            action_button.setVisible(True)
+            self.setButtonText(QWizard.CustomButton2, "Skapa rapport")
+            action_button.setEnabled(True)
+            logger.debug("EXPORT page: Back + Skapa rapport buttons visible")
+
+        elif page_id == self.PAGE_UPDATE:
+            # Update page: Back + "Uppdatera och fortsätt"
+            back_button.setVisible(True)
+            action_button.setVisible(True)
+            self.setButtonText(QWizard.CustomButton2, "Uppdatera och fortsätt")
+            action_button.setEnabled(True)
+            logger.debug("UPDATE page: Back + Uppdatera buttons visible")
+
+    def _back_to_project_overview(self):
+        """Navigate back to start page (project overview)."""
+        try:
+            # Auto-save current page if supported
+            current_page = self.currentPage()
+            if hasattr(current_page, 'auto_save'):
+                current_page.auto_save()
+                logger.debug("Auto-saved before navigation")
+
+            logger.info("Navigating back to project overview")
+            self.setCurrentId(self.PAGE_START)
+
+            # Reload project list
+            start_page = self.page(self.PAGE_START)
+            if hasattr(start_page, '_load_projects'):
+                start_page._load_projects()
+                logger.debug("Project list reloaded")
+
+        except Exception as e:
+            logger.exception("Failed to navigate to project overview")
+            QMessageBox.critical(self, "Fel", f"Kunde inte navigera: {e}")
+
+    def _smart_button_action(self):
+        """Smart action button - different behavior per page."""
+        try:
+            page_id = self.currentId()
+            current_page = self.currentPage()
+
+            if page_id == self.PAGE_IMPORT:
+                # Import page: Start processing
+                logger.info("Triggering file processing from import page")
+                if hasattr(current_page, 'start_processing'):
+                    current_page.start_processing()
+                else:
+                    logger.warning("Import page missing start_processing() method")
+
+            elif page_id == self.PAGE_EXPORT:
+                # Export page: Generate report
+                logger.info("Triggering report export from export page")
+                if hasattr(current_page, 'export_report'):
+                    current_page.export_report()
+                else:
+                    logger.warning("Export page missing export_report() method")
+
+            elif page_id == self.PAGE_UPDATE:
+                # Update page: Apply updates
+                logger.info("Triggering update application from update page")
+                if hasattr(current_page, 'apply_updates'):
+                    current_page.apply_updates()
+                else:
+                    logger.warning("Update page missing apply_updates() method")
+
+            else:
+                logger.warning(f"Smart button clicked on unexpected page: {page_id}")
+
+        except Exception as e:
+            logger.exception("Failed to execute smart button action")
+            QMessageBox.critical(self, "Fel", f"Kunde inte utföra åtgärd: {e}")
 
     def closeEvent(self, event):
         """Handle wizard close event."""

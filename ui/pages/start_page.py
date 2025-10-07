@@ -142,7 +142,7 @@ class StartPage(QWizardPage):
         # Action buttons
         button_layout = QHBoxLayout()
 
-        self.btn_update = QPushButton("Uppdatera projekt")
+        self.btn_update = QPushButton("Uppdatera projekt...")
         self.btn_update.clicked.connect(self._update_project)
         self.btn_update.setEnabled(False)
         button_layout.addWidget(self.btn_update)
@@ -303,7 +303,7 @@ class StartPage(QWizardPage):
             QMessageBox.critical(self, "Fel", f"Oväntat fel: {e}")
 
     def _open_selected_project(self):
-        """Open selected project."""
+        """Open selected project with smart navigation (matching v1 logic)."""
         selected = self.projects_table.selectedItems()
         if not selected:
             return
@@ -317,8 +317,24 @@ class StartPage(QWizardPage):
         self.wizard_ref.set_current_project(project_id, project_name)
         logger.info(f"Opened project: id={project_id}, name={project_name}")
 
-        # Move to next page
-        self.wizard_ref.next()
+        # Smart navigation based on project status (matching v1)
+        try:
+            db = self.wizard_ref.context.database
+            stats = db.get_project_statistics(project_id)
+
+            if stats['total_articles'] > 0:
+                # Articles exist → Go directly to EXPORT (article cards)
+                logger.info(f"Project has {stats['total_articles']} articles - jumping to export page")
+                self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_EXPORT)
+            else:
+                # No articles → Go to IMPORT to add files
+                logger.info("Project has no articles - going to import page")
+                self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_IMPORT)
+
+        except Exception as e:
+            logger.exception(f"Failed to check project status: {e}")
+            # Fallback: go to import
+            self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_IMPORT)
 
     def _update_project(self):
         """Update selected project (placeholder for now)."""

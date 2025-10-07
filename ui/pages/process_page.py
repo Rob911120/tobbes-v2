@@ -281,6 +281,10 @@ class ProcessPage(QWizardPage):
                 f"Applicerade {success_count} charge-val till databasen."
             )
 
+            # Auto-navigate to EXPORT page (matching v1 behavior)
+            logger.info("Auto-navigating to EXPORT page after successful processing")
+            self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_EXPORT)
+
         except DatabaseError as e:
             logger.error(f"Database error during apply: {e}")
             QMessageBox.critical(

@@ -288,6 +288,29 @@ class ImportPage(QWizardPage):
         """Page is complete when nivålista is imported."""
         return len(self.imported_articles) > 0
 
+    def start_processing(self):
+        """
+        Start processing imported files (called by wizard button).
+
+        Validates files are imported, then navigates to PROCESS page.
+        """
+        try:
+            if not self.isComplete():
+                QMessageBox.warning(
+                    self,
+                    "Validering misslyckades",
+                    "Du måste importera nivålista innan du kan fortsätta."
+                )
+                return
+
+            logger.info("Starting processing - navigating to PROCESS page")
+            # Navigate to process page
+            self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_PROCESS)
+
+        except Exception as e:
+            logger.exception("Failed to start processing")
+            QMessageBox.critical(self, "Fel", f"Kunde inte starta bearbetning: {e}")
+
     def initializePage(self):
         """Initialize page when entering."""
         # Clear previous imports if user goes back
