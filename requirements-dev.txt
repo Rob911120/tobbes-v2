@@ -1,0 +1,17 @@
+# Development dependencies for Tobbes v2
+-r requirements.txt
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-qt>=4.2.0
+
+# Code quality
+black>=23.0.0
+mypy>=1.0.0
+ruff>=0.1.0
+
+# Build tools
+nuitka>=1.8.0
+ordered-set>=4.1.0
+zstandard>=0.21.0

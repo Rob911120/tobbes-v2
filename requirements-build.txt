@@ -1,0 +1,15 @@
+# Build dependencies for Tobbes v2
+# Install with: pip install -r requirements-build.txt
+
+# Nuitka compiler
+nuitka>=1.9.0
+
+# Nuitka dependencies
+ordered-set>=4.1.0
+zstandard>=0.22.0
+
+# For Windows builds (optional, auto-downloaded by Nuitka)
+# - Microsoft C++ Build Tools required on Windows
+
+# For macOS builds (optional)
+# - Xcode Command Line Tools required on macOS
