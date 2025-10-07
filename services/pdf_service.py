@@ -10,7 +10,7 @@ Use chrome_checker.ensure_chrome_installed() before using this service.
 import logging
 import time
 from pathlib import Path
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Dict
 from datetime import datetime
 
 try:
@@ -21,6 +21,14 @@ except ImportError:
     sync_playwright = None
     Browser = None
     Page = None
+
+try:
+    from pypdf import PdfWriter, PdfReader
+    PYPDF_AVAILABLE = True
+except ImportError:
+    PYPDF_AVAILABLE = False
+    PdfWriter = None
+    PdfReader = None
 
 from domain.exceptions import ReportGenerationError
 from services.chrome_checker import ensure_chrome_installed
@@ -150,8 +158,7 @@ class PDFService:
         """
         Merge multiple PDF files into one.
 
-        NOTE: This is a placeholder. For production, use PyPDF2 or pikepdf.
-        Playwright doesn't have built-in PDF merging.
+        Uses pypdf library for actual PDF concatenation with progress tracking.
 
         Args:
             pdf_files: List of PDF file paths to merge
@@ -169,17 +176,11 @@ class PDFService:
             >>> pdfs = [Path('page1.pdf'), Path('page2.pdf')]
             >>> merged = service.merge_pdfs(pdfs, Path('./merged.pdf'))
         """
-        # This is a simplified implementation
-        # In production, use PyPDF2:
-        #
-        # from PyPDF2 import PdfMerger
-        # merger = PdfMerger()
-        # for pdf in pdf_files:
-        #     merger.append(pdf)
-        # merger.write(output_path)
-        # merger.close()
-
-        logger.warning("PDF merging not fully implemented - using placeholder")
+        if not PYPDF_AVAILABLE:
+            raise ReportGenerationError(
+                "pypdf is not installed. Install with: pip install pypdf",
+                details={"library": "pypdf"}
+            )
 
         if not pdf_files:
             raise ReportGenerationError(
@@ -187,13 +188,65 @@ class PDFService:
                 details={"pdf_files": []}
             )
 
-        # For now, just copy the first file
-        # TODO: Implement proper PDF merging with PyPDF2
-        import shutil
-        shutil.copy2(pdf_files[0], output_path)
+        # Validate all input files exist
+        for pdf_file in pdf_files:
+            if not pdf_file.exists():
+                raise ReportGenerationError(
+                    f"PDF-fil saknas: {pdf_file}",
+                    details={"pdf_file": str(pdf_file)}
+                )
 
-        logger.info(f"Merged {len(pdf_files)} PDFs to: {output_path}")
-        return output_path
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            writer = PdfWriter()
+            total_files = len(pdf_files)
+
+            logger.info(f"Merging {total_files} PDF files...")
+
+            for index, pdf_file in enumerate(pdf_files):
+                try:
+                    # Read PDF
+                    reader = PdfReader(str(pdf_file))
+
+                    # Append all pages
+                    for page in reader.pages:
+                        writer.add_page(page)
+
+                    # Update progress
+                    if progress_callback:
+                        progress = int(((index + 1) / total_files) * 100)
+                        progress_callback(progress)
+
+                    logger.debug(f"Merged {pdf_file.name} ({len(reader.pages)} pages)")
+
+                except Exception as e:
+                    logger.warning(f"Failed to merge {pdf_file}: {e}")
+                    # Continue with other files
+
+            # Write merged PDF
+            with open(output_path, 'wb') as output_file:
+                writer.write(output_file)
+
+            logger.info(f"Successfully merged {total_files} PDFs to: {output_path}")
+
+            # Final progress update
+            if progress_callback:
+                progress_callback(100)
+
+            return output_path
+
+        except Exception as e:
+            logger.exception(f"Failed to merge PDFs: {e}")
+            raise ReportGenerationError(
+                f"PDF-sammanslagning misslyckades: {e}",
+                details={
+                    "pdf_files": [str(f) for f in pdf_files],
+                    "output_path": str(output_path),
+                    "error": str(e)
+                }
+            )
 
     def retry_operation(
         self,
@@ -278,11 +331,190 @@ class PDFService:
 
         return True
 
+    def create_separator_page(
+        self,
+        title: str,
+        subtitle: Optional[str] = None,
+        output_path: Optional[Path] = None,
+    ) -> Path:
+        """
+        Create a separator page for PDF sections.
+
+        Creates a simple HTML page with a title and optional subtitle,
+        then converts it to PDF.
+
+        Args:
+            title: Main title for separator page
+            subtitle: Optional subtitle
+            output_path: Output path (auto-generated if not provided)
+
+        Returns:
+            Path to separator PDF
+
+        Example:
+            >>> service = PDFService()
+            >>> separator = service.create_separator_page(
+            ...     title="Materialintyg",
+            ...     subtitle="Artikel ART-001"
+            ... )
+        """
+        if output_path is None:
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()) / "tobbes_separators"
+            temp_dir.mkdir(exist_ok=True)
+            output_path = temp_dir / f"separator_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+
+        # Create HTML for separator page
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    font-family: Arial, sans-serif;
+                    background-color: #f5f5f5;
+                }}
+                .separator-content {{
+                    text-align: center;
+                    padding: 40px;
+                }}
+                h1 {{
+                    font-size: 36px;
+                    color: #333;
+                    margin: 0 0 20px 0;
+                    font-weight: bold;
+                }}
+                h2 {{
+                    font-size: 24px;
+                    color: #666;
+                    margin: 0;
+                    font-weight: normal;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="separator-content">
+                <h1>{title}</h1>
+                {f'<h2>{subtitle}</h2>' if subtitle else ''}
+            </div>
+        </body>
+        </html>
+        """
+
+        # Generate separator PDF
+        return self.html_to_pdf(html_content, output_path)
+
+    def merge_pdfs_with_separators(
+        self,
+        pdf_groups: Dict[str, List[Path]],
+        output_path: Path,
+        add_separators: bool = True,
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> Path:
+        """
+        Merge PDF files grouped by category with optional separator pages.
+
+        This is useful for creating reports where certificates are grouped
+        by type (e.g., "Materialintyg", "Svetslogg", etc.).
+
+        Args:
+            pdf_groups: Dict mapping group names to list of PDF paths
+                       e.g., {"Materialintyg": [cert1.pdf, cert2.pdf]}
+            output_path: Output merged PDF path
+            add_separators: Add separator pages between groups
+            progress_callback: Optional callback for progress (0-100)
+
+        Returns:
+            Path to merged PDF
+
+        Raises:
+            ReportGenerationError: If merging fails
+
+        Example:
+            >>> service = PDFService()
+            >>> groups = {
+            ...     "Materialintyg": [Path('cert1.pdf'), Path('cert2.pdf')],
+            ...     "Svetslogg": [Path('cert3.pdf')]
+            ... }
+            >>> merged = service.merge_pdfs_with_separators(groups, Path('./report.pdf'))
+        """
+        if not pdf_groups:
+            raise ReportGenerationError(
+                "Inga PDF-grupper att slå samman",
+                details={"pdf_groups": {}}
+            )
+
+        try:
+            all_pdfs = []
+            separator_pdfs = []
+
+            # Calculate total for progress
+            total_groups = len(pdf_groups)
+            processed_groups = 0
+
+            for group_name, pdf_files in pdf_groups.items():
+                if not pdf_files:
+                    continue
+
+                # Create separator page if requested
+                if add_separators:
+                    separator_pdf = self.create_separator_page(
+                        title=group_name,
+                        subtitle=f"{len(pdf_files)} dokument"
+                    )
+                    all_pdfs.append(separator_pdf)
+                    separator_pdfs.append(separator_pdf)
+
+                # Add all PDFs in this group
+                all_pdfs.extend(pdf_files)
+
+                # Update progress
+                processed_groups += 1
+                if progress_callback:
+                    progress = int((processed_groups / total_groups) * 90)  # Save 10% for final merge
+                    progress_callback(progress)
+
+            # Merge all PDFs
+            result = self.merge_pdfs(
+                pdf_files=all_pdfs,
+                output_path=output_path,
+                progress_callback=lambda p: progress_callback(90 + p // 10) if progress_callback else None
+            )
+
+            # Clean up separator PDFs
+            for separator_pdf in separator_pdfs:
+                try:
+                    separator_pdf.unlink()
+                except Exception:
+                    pass  # Ignore cleanup errors
+
+            logger.info(f"Merged {len(pdf_groups)} groups ({len(all_pdfs)} total PDFs) to: {output_path}")
+
+            return result
+
+        except Exception as e:
+            logger.exception(f"Failed to merge PDFs with separators: {e}")
+            raise ReportGenerationError(
+                f"PDF-sammanslagning med avdelare misslyckades: {e}",
+                details={
+                    "pdf_groups": {k: [str(f) for f in v] for k, v in pdf_groups.items()},
+                    "output_path": str(output_path),
+                    "error": str(e)
+                }
+            )
+
     def get_pdf_page_count(self, pdf_path: Path) -> int:
         """
         Get number of pages in PDF.
 
-        NOTE: This is a placeholder. For production, use PyPDF2 or pikepdf.
+        Uses pypdf library to accurately count pages.
 
         Args:
             pdf_path: Path to PDF file
@@ -290,19 +522,35 @@ class PDFService:
         Returns:
             Number of pages
 
+        Raises:
+            ReportGenerationError: If unable to read PDF
+
         Example:
             >>> service = PDFService()
             >>> pages = service.get_pdf_page_count(Path('./output.pdf'))
         """
-        # This is a simplified implementation
-        # In production, use PyPDF2:
-        #
-        # from PyPDF2 import PdfReader
-        # reader = PdfReader(pdf_path)
-        # return len(reader.pages)
+        if not PYPDF_AVAILABLE:
+            logger.warning("pypdf not available - returning 1")
+            return 1
 
-        logger.warning("PDF page counting not fully implemented - returning 1")
-        return 1  # Placeholder
+        if not pdf_path.exists():
+            raise ReportGenerationError(
+                f"PDF-fil saknas: {pdf_path}",
+                details={"pdf_path": str(pdf_path)}
+            )
+
+        try:
+            reader = PdfReader(str(pdf_path))
+            page_count = len(reader.pages)
+            logger.debug(f"PDF {pdf_path.name} has {page_count} pages")
+            return page_count
+
+        except Exception as e:
+            logger.exception(f"Failed to count PDF pages: {e}")
+            raise ReportGenerationError(
+                f"Kunde inte räkna sidor i PDF: {e}",
+                details={"pdf_path": str(pdf_path), "error": str(e)}
+            )
 
 
 def create_pdf_service(
