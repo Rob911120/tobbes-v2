@@ -68,7 +68,7 @@ class TobbesWizard(QWizard):
 
             # Create database
             db = create_database(
-                db_type="sqlite",
+                backend="sqlite",
                 path=settings.database_path
             )
 
