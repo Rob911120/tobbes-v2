@@ -98,14 +98,19 @@ def main():
     print()
     print("=" * 60)
 
-    # TODO: Import and launch wizard when UI is ready
-    # from PySide6.QtWidgets import QApplication
-    # from ui.wizard import MainWizard
-    #
-    # app = QApplication(sys.argv)
-    # wizard = MainWizard()
-    # wizard.show()
-    # sys.exit(app.exec())
+    # Launch GUI wizard
+    try:
+        from PySide6.QtWidgets import QApplication
+        from ui.wizard import TobbesWizard
+
+        app = QApplication(sys.argv)
+        wizard = TobbesWizard()
+        wizard.show()
+        sys.exit(app.exec())
+    except Exception as e:
+        print(f"\n❌ Failed to launch GUI: {e}")
+        print("Run in development mode: python -m pytest tests/")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

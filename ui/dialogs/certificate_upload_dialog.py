@@ -21,7 +21,8 @@ except ImportError:
 
 from operations import guess_certificate_type, validate_certificate_file
 from services import FileService
-from domain.exceptions import ValidationError, DatabaseError
+from services.pdf_service import create_pdf_service
+from domain.exceptions import ValidationError, DatabaseError, ReportGenerationError
 from config.constants import ALLOWED_CERTIFICATE_EXTENSIONS, DEFAULT_CERTIFICATE_TYPES
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,16 @@ class CertificateUploadDialog(QDialog):
                 preserve_name=True,
             )
 
+            # Get actual page count
+            page_count = 1  # Default
+            try:
+                pdf_service = create_pdf_service()
+                page_count = pdf_service.get_pdf_page_count(dest_path)
+                logger.debug(f"PDF page count: {page_count}")
+            except (ReportGenerationError, Exception) as e:
+                logger.warning(f"Could not get page count: {e}")
+                # Continue with default page_count=1
+
             # Save to database
             logger.info(f"Saving certificate to database: {dest_path}")
             cert_id = self.database.save_certificate(
@@ -211,7 +222,7 @@ class CertificateUploadDialog(QDialog):
                 certificate_type=cert_type,
                 file_path=str(dest_path),
                 original_filename=self.selected_file.name,
-                page_count=1,  # TODO: Get actual page count from PDF
+                page_count=page_count,
             )
 
             logger.info(f"Certificate saved: id={cert_id}, type={cert_type}")
