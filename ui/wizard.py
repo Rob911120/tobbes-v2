@@ -110,15 +110,14 @@ class TobbesWizard(QWizard):
         from ui.pages.import_page import ImportPage
         from ui.pages.process_page import ProcessPage
         from ui.pages.export_page import ExportPage
+        from ui.pages.update_page import UpdatePage
 
         # Add pages
         self.start_page_id = self.addPage(StartPage(self))
         self.import_page_id = self.addPage(ImportPage(self))
         self.process_page_id = self.addPage(ProcessPage(self))
         self.export_page_id = self.addPage(ExportPage(self))
-
-        # TODO: Add more pages as they are implemented:
-        # - UpdatePage (new feature)
+        self.update_page_id = self.addPage(UpdatePage(self))
 
         logger.info("Wizard pages added")
 

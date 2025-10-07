@@ -6,10 +6,12 @@ from .start_page import StartPage
 from .import_page import ImportPage
 from .process_page import ProcessPage
 from .export_page import ExportPage
+from .update_page import UpdatePage
 
 __all__ = [
     "StartPage",
     "ImportPage",
     "ProcessPage",
     "ExportPage",
+    "UpdatePage",
 ]
