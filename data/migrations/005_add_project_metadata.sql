@@ -1,6 +1,9 @@
 -- Migration 005: Add project metadata fields
 -- Adds purchase_order_number and project_type to projects table
 
+-- NOTE: This migration is idempotent - it will skip if columns already exist
+-- The Python migration runner handles duplicate column errors gracefully
+
 -- Add purchase_order_number (Beställningsnummer)
 ALTER TABLE projects ADD COLUMN purchase_order_number TEXT;
 

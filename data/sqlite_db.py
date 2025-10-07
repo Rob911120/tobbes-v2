@@ -64,7 +64,16 @@ class SQLiteDatabase(DatabaseInterface):
         for migration_file in migration_files:
             logger.debug(f"Running migration: {migration_file.name}")
             sql = migration_file.read_text()
-            self.conn.executescript(sql)
+
+            try:
+                self.conn.executescript(sql)
+            except sqlite3.OperationalError as e:
+                # Handle idempotent migrations (e.g., duplicate column)
+                if "duplicate column" in str(e).lower():
+                    logger.warning(f"Migration {migration_file.name} already applied (columns exist) - skipping")
+                else:
+                    # Re-raise other operational errors
+                    raise
 
         self.conn.commit()
         logger.info(f"Executed {len(migration_files)} migrations")
