@@ -25,30 +25,31 @@ jobs:
           pip install -r requirements-build.txt
 
       - name: Build EXE with Nuitka
+        shell: bash
         run: |
-          python -m nuitka ^
-            --standalone ^
-            --output-dir=dist ^
-            --enable-plugin=pyside6 ^
-            --include-package=operations ^
-            --include-package=domain ^
-            --include-package=data ^
-            --include-package=services ^
-            --include-package=config ^
-            --include-package=ui ^
-            --include-data-dir=data/migrations=data/migrations ^
-            --jobs=4 ^
-            --lto=yes ^
-            --python-flag=no_site ^
-            --python-flag=no_warnings ^
-            --follow-imports ^
-            --assume-yes-for-downloads ^
-            --windows-disable-console ^
-            --windows-company-name=FA-TEC ^
-            --windows-product-name="Tobbes v2 - Spårbarhetsguiden" ^
-            --windows-file-version=2.0.0 ^
-            --windows-product-version=2.0.0 ^
-            --windows-file-description="Spårbarhetsguide för materialcertifikat" ^
+          python -m nuitka \
+            --standalone \
+            --output-dir=dist \
+            --enable-plugin=pyside6 \
+            --include-package=operations \
+            --include-package=domain \
+            --include-package=data \
+            --include-package=services \
+            --include-package=config \
+            --include-package=ui \
+            --include-data-dir=data/migrations=data/migrations \
+            --jobs=4 \
+            --lto=yes \
+            --python-flag=no_site \
+            --python-flag=no_warnings \
+            --follow-imports \
+            --assume-yes-for-downloads \
+            --windows-disable-console \
+            --windows-company-name=FA-TEC \
+            --windows-product-name="Tobbes v2 - Spårbarhetsguiden" \
+            --windows-file-version=2.0.0 \
+            --windows-product-version=2.0.0 \
+            --windows-file-description="Spårbarhetsguide för materialcertifikat" \
             main.py
 
       - name: Create release package
