@@ -42,8 +42,8 @@ from .validators import (
 
 from .rules import (
     guess_certificate_type,
-    find_best_charge_match,
     get_available_charges,
+    get_available_batches,
     should_remove_certificates_on_charge_change,
     calculate_match_statistics,
     group_certificates_by_article,
@@ -85,8 +85,8 @@ __all__ = [
     "sanitize_filename",
     # Rules
     "guess_certificate_type",
-    "find_best_charge_match",
     "get_available_charges",
+    "get_available_batches",
     "should_remove_certificates_on_charge_change",
     "calculate_match_statistics",
     "group_certificates_by_article",

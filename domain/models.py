@@ -69,7 +69,7 @@ class Article:
     """
     Project-specific article (from BOM/nivålista).
 
-    Contains project-specific data like quantity, level, and charge.
+    Contains project-specific data like quantity, level, charge, and batch.
     Global notes are joined from GlobalArticle.
     """
 
@@ -80,6 +80,7 @@ class Article:
     level: str = ""
     parent_article: Optional[str] = None
     charge_number: Optional[str] = None
+    batch_number: Optional[str] = None  # From lagerlogg (independent of charge)
     id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -102,12 +103,16 @@ class InventoryItem:
     Inventory item (from lagerlogg).
 
     Represents a batch of material with a specific charge number.
+
+    Note: charge_number CAN be empty for admin posts, articles in receiving, etc.
+    (v1 compatibility). Empty charges are filtered out during matching.
+    quantity CAN be negative for withdrawals in lagerlogg.
     """
 
     project_id: int
     article_number: str
-    charge_number: str
-    quantity: float = 0.0
+    charge_number: str = ""  # Allow empty for admin posts, articles in receiving
+    quantity: float = 0.0  # Can be negative for withdrawals
     batch_id: Optional[str] = None
     location: Optional[str] = None
     received_date: Optional[datetime] = None
@@ -118,10 +123,8 @@ class InventoryItem:
         """Validate inventory item."""
         if not self.article_number:
             raise ValueError("article_number cannot be empty")
-        if not self.charge_number:
-            raise ValueError("charge_number cannot be empty")
-        if self.quantity < 0:
-            raise ValueError("quantity cannot be negative")
+        # Note: charge_number CAN be empty (admin posts, articles in receiving)
+        # Note: quantity CAN be negative (withdrawals in lagerlogg)
 
 
 @dataclass
@@ -227,26 +230,36 @@ class NotesAuditEntry:
 @dataclass
 class MatchResult:
     """
-    Result of matching articles with inventory charges.
+    Result of matching articles with inventory charges and batches.
 
     Used in the matching/process step to track which articles
-    got matched and which need manual charge selection.
+    got matched and which need manual charge/batch selection.
+
+    Both charge and batch are treated equally - user must select
+    if multiple values are available.
     """
 
     article: Article
     available_charges: List[str] = field(default_factory=list)
+    available_batches: List[str] = field(default_factory=list)
     selected_charge: Optional[str] = None
+    selected_batch: Optional[str] = None
     auto_matched: bool = False
 
     @property
     def needs_manual_selection(self) -> bool:
-        """Check if user needs to manually select a charge."""
-        return len(self.available_charges) > 1 and not self.selected_charge
+        """Check if user needs to manually select a charge or batch."""
+        charge_needs_selection = len(self.available_charges) > 1 and not self.selected_charge
+        batch_needs_selection = len(self.available_batches) > 1 and not self.selected_batch
+        return charge_needs_selection or batch_needs_selection
 
     @property
     def is_matched(self) -> bool:
-        """Check if article has a selected charge."""
-        return self.selected_charge is not None
+        """Check if article has necessary charge/batch selected."""
+        # Matched if we have values when they're available
+        charge_ok = (len(self.available_charges) == 0) or (self.selected_charge is not None)
+        batch_ok = (len(self.available_batches) == 0) or (self.selected_batch is not None)
+        return charge_ok and batch_ok
 
     @property
     def match_status(self) -> str:
@@ -254,13 +267,13 @@ class MatchResult:
         Get user-friendly match status.
 
         Returns:
-            "matched" - Has a selected charge
-            "needs_selection" - Multiple charges available
-            "no_charges" - No charges available
+            "matched" - Has necessary charge/batch selected
+            "needs_selection" - Multiple charges/batches available
+            "no_charges" - No charges/batches available
         """
         if self.is_matched:
             return "matched"
-        elif len(self.available_charges) > 1:
+        elif self.needs_manual_selection:
             return "needs_selection"
         else:
             return "no_charges"

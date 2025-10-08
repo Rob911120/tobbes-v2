@@ -52,38 +52,6 @@ def guess_certificate_type(filename: str) -> str:
     return "Andra handlingar"
 
 
-def find_best_charge_match(
-    article: Article,
-    inventory_items: List[InventoryItem],
-) -> Optional[str]:
-    """
-    Find best charge match for an article from inventory.
-
-    Matching rules:
-    1. Exact article_number match
-    2. Take most recent (last in list)
-    3. If no matches, return None
-
-    Args:
-        article: Article to match
-        inventory_items: Available inventory items (sorted by received_date)
-
-    Returns:
-        Charge number or None if no match found
-    """
-    matching_items = [
-        item
-        for item in inventory_items
-        if item.article_number == article.article_number
-    ]
-
-    if matching_items:
-        # Return most recent (last item, assuming sorted by received_date)
-        return matching_items[-1].charge_number
-
-    return None
-
-
 def get_available_charges(
     article: Article,
     inventory_items: List[InventoryItem],
@@ -91,12 +59,16 @@ def get_available_charges(
     """
     Get all available charges for an article.
 
+    Note: Does NOT filter empty charges - they're valid values!
+    Some articles have batch but no charge (admin posts, articles in receiving).
+
     Args:
         article: Article to find charges for
         inventory_items: Available inventory items
 
     Returns:
         List of unique charge numbers (most recent first)
+        Empty strings are included as valid values
     """
     matching_items = [
         item
@@ -105,6 +77,7 @@ def get_available_charges(
     ]
 
     # Get unique charges, preserve order (most recent first)
+    # Do NOT filter out empty charges - they're valid!
     seen = set()
     charges = []
     for item in reversed(matching_items):
@@ -113,6 +86,43 @@ def get_available_charges(
             seen.add(item.charge_number)
 
     return charges
+
+
+def get_available_batches(
+    article: Article,
+    inventory_items: List[InventoryItem],
+) -> List[str]:
+    """
+    Get all available batches for an article.
+
+    Same logic as get_available_charges() - does NOT filter empty batches!
+    Some articles have charge but no batch.
+
+    Args:
+        article: Article to find batches for
+        inventory_items: Available inventory items
+
+    Returns:
+        List of unique batch numbers (most recent first)
+        Empty strings are included as valid values
+    """
+    matching_items = [
+        item
+        for item in inventory_items
+        if item.article_number == article.article_number
+    ]
+
+    # Get unique batches, preserve order (most recent first)
+    # Do NOT filter out empty batches - they're valid!
+    seen = set()
+    batches = []
+    for item in reversed(matching_items):
+        batch = item.batch_id or ""  # batch_id can be None, treat as empty string
+        if batch not in seen:
+            batches.append(batch)
+            seen.add(batch)
+
+    return batches
 
 
 def should_remove_certificates_on_charge_change(

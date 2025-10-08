@@ -368,6 +368,24 @@ class DatabaseInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    def delete_inventory_items(
+        self,
+        project_id: int,
+    ) -> bool:
+        """
+        Delete all inventory items for a project.
+
+        Used before re-importing lagerlogg to prevent duplicates.
+
+        Args:
+            project_id: The project ID
+
+        Returns:
+            bool: True if successful
+        """
+        pass
+
     # ==================== Certificate Operations ====================
 
     @abstractmethod
@@ -375,26 +393,30 @@ class DatabaseInterface(ABC):
         self,
         project_id: int,
         article_number: str,
-        certificate_type: str,
-        file_path: str,
-        original_filename: str,
-        page_count: int = 1,
+        certificate_id: str,
+        cert_type: str,
+        stored_path: str,
+        stored_name: str,
+        original_name: str,
+        page_count: int = 0,
         project_article_id: Optional[int] = None,
     ) -> int:
         """
-        Save a certificate for an article.
+        Save a certificate for an article with full storage metadata.
 
         Args:
             project_id: The project ID
             article_number: Article number
-            certificate_type: Type of certificate (e.g., "Materialintyg", "Svetslogg")
-            file_path: Path to certificate file (relative to project dir)
-            original_filename: Original filename
+            certificate_id: Unique certificate ID (e.g., "ART_123_Materialintyg_20250107")
+            cert_type: Type of certificate (e.g., "Materialintyg", "Svetslogg")
+            stored_path: Path to stored certificate file (relative to project dir)
+            stored_name: Stored filename (same as certificate_id + .pdf)
+            original_name: Original filename before processing
             page_count: Number of pages in PDF
             project_article_id: Optional reference to specific project_articles.id
 
         Returns:
-            int: Certificate ID
+            int: Certificate database ID
         """
         pass
 

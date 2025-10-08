@@ -1,204 +1,349 @@
 """
 Article Card Widget for Tobbes v2.
 
-Displays article information with editable global notes.
+Displays article information with all editable fields, based on v1 design.
+SQLite-optimized: Direct saves instead of debounced JSON writes.
 """
 
 import logging
+from typing import Dict, Any
 
 try:
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QTextEdit, QGroupBox, QFrame
+        QLineEdit, QSpinBox, QCheckBox, QFrame
     )
-    from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtCore import Signal, Qt
     PYSIDE6_AVAILABLE = True
 except ImportError:
     PYSIDE6_AVAILABLE = False
     QWidget = object
+    Signal = None
 
-from operations import update_article_notes
-from domain.exceptions import DatabaseError
+from .charge_selector import ChargeSelector
+from .batch_selector import BatchSelector
+from .certificate_manager import CertificateManager
+from .notes_text_edit import NotesTextEdit
 
 logger = logging.getLogger(__name__)
 
 
-class ArticleCard(QWidget):
+class ArticleCard(QFrame):
     """
-    Article card widget with global notes.
+    Article card widget with full editing capabilities.
 
     Features:
-    - Display article information (number, description, quantity, level, charge)
-    - Editable global notes with auto-save (debounced)
-    - Shows notes history on hover (TODO: future)
+    - Article header (number + description)
+    - Batch number input
+    - Charge selector (color-coded)
+    - Quantity spinbox
+    - Certificate manager
+    - Comment field
+    - Verified checkbox
+    - Direct SQLite saves (no debouncing needed)
 
-    Example:
-        >>> card = ArticleCard(article_data, database, user_name="Tobbes")
-        >>> layout.addWidget(card)
+    Signals:
+        verified_changed(bool): Emitted when verification checkbox changes
+        save_required(): Emitted when any field changes (parent should save to DB)
+        notes_changed(str, str): Emitted when notes change (article_number, notes_text)
     """
 
-    def __init__(self, article: dict, database, user_name: str = "user", parent=None):
+    # Signals
+    verified_changed = Signal(bool)
+    save_required = Signal()
+    notes_changed = Signal(str, str)
+
+    def __init__(
+        self,
+        article_data: Dict[str, Any],
+        config: Dict[str, Any] = None,
+        db=None,
+        project_id: int = None,
+        parent=None
+    ):
         """
         Initialize article card.
 
         Args:
-            article: Article dict with keys: article_number, description, quantity, etc.
-            database: DatabaseInterface instance
-            user_name: User name for audit logging
+            article_data: Article data dict with keys:
+                - article_number: str
+                - description: str
+                - quantity: float
+                - batch_number: str (optional)
+                - charge_number: str (optional)
+                - available_charges: List[str] (optional)
+                - charge_count: int (optional)
+                - comment: str (optional)
+                - verified: bool (optional)
+                - certificates: List[dict] (optional)
+            config: Config dict (for certificate types, etc.)
+            db: Database interface (for certificate processing)
+            project_id: Project ID (for certificate processing)
             parent: Parent widget
         """
+        if not PYSIDE6_AVAILABLE:
+            raise EnvironmentError("PySide6 is not installed")
+
         super().__init__(parent)
 
-        self.article = article
-        self.database = database
-        self.user_name = user_name
+        self.article_data = article_data
+        self.config = config or {}
+        self.db = db
+        self.project_id = project_id
+        self.is_verified = article_data.get('verified', False)
 
-        # Debounce timer for auto-save notes
-        self.save_timer = QTimer(self)
-        self.save_timer.setSingleShot(True)
-        self.save_timer.timeout.connect(self._save_notes)
+        self._setup_card()
+        self._create_widgets()
+        self._setup_layout()
+        self._connect_signals()
 
-        self._setup_ui()
-        self._load_notes()
+    def _setup_card(self):
+        """Configure card styling."""
+        self.setFrameStyle(QFrame.Box | QFrame.Raised)
+        self.setLineWidth(1)
+        self.setStyleSheet("""
+            ArticleCard {
+                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 8px;
+                margin: 4px;
+                padding: 8px;
+            }
 
-    def _setup_ui(self):
-        """Setup UI components."""
-        layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
+            ArticleCard:hover {
+                border: 2px solid #0078d4;
+                background-color: #f8f9fa;
+            }
 
-        # Article info section
-        info_frame = QFrame()
-        info_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        info_layout = QVBoxLayout()
+            ArticleCard[verified="true"] {
+                border: 2px solid #28a745;
+                background-color: #f8fff8;
+            }
+        """)
 
-        # Article number + description
-        header_layout = QHBoxLayout()
+        # Set property for CSS selector
+        self.setProperty("verified", str(self.is_verified).lower())
 
-        article_num_label = QLabel(f"<b>{self.article['article_number']}</b>")
-        article_num_label.setProperty("class", "header")
-        header_layout.addWidget(article_num_label)
+    def _create_widgets(self):
+        """Create widgets for the card."""
+        # Article info
+        article_num = self.article_data.get('article_number', 'Okänt')
+        description = self.article_data.get('description', 'Ingen beskrivning')
 
-        header_layout.addStretch()
+        self.article_header = QLabel(f"<b>{article_num}</b>")
+        self.article_header.setStyleSheet("font-size: 14px; color: #0078d4;")
+        self.article_header.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+
+        self.description_label = QLabel(description)
+        self.description_label.setWordWrap(True)
+        self.description_label.setStyleSheet("color: #333; margin-bottom: 8px;")
+        self.description_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+
+        # Charge status (if multiple charges available)
+        charge_count = self.article_data.get('charge_count', 0)
+        if charge_count > 1:
+            self.charge_status = QLabel(f"⚠ {charge_count} chargenummer tillgängliga")
+            self.charge_status.setStyleSheet("""
+                color: #ff9800;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 4px;
+                background-color: #fff3cd;
+                border-radius: 3px;
+            """)
+        else:
+            self.charge_status = None
+
+        # Batch number section (same logic as charge - dropdown with multiple options)
+        self.batch_label = QLabel("Batchnummer:")
+        available_batches = self.article_data.get('available_batches', [])
+        current_batch = self.article_data.get('batch_number') or ""  # Convert None → ""
+        self.batch_selector = BatchSelector(
+            available_batches=available_batches,
+            current_value=current_batch
+        )
+
+        # Charge selector
+        self.charge_label = QLabel("Chargenummer:")
+        available_charges = self.article_data.get('available_charges', [])
+        current_charge = self.article_data.get('charge_number') or ""  # Convert None → ""
+        self.charge_selector = ChargeSelector(
+            available_charges=available_charges,
+            current_value=current_charge
+        )
+
+        # Quantity section
+        self.quantity_label = QLabel("Kvantitet:")
+        self.quantity_input = QSpinBox()
+        self.quantity_input.setRange(0, 99999)
+        self.quantity_input.setValue(int(self.article_data.get('quantity', 0)))
+
+        # Certificate manager
+        self.certificate_manager = CertificateManager(
+            article_data=self.article_data,
+            config=self.config,
+            db=self.db,
+            project_id=self.project_id
+        )
+
+        # Comment section (global notes - shared across all projects)
+        self.comment_label = QLabel("Kommentar (global):")
+        self.comment_input = NotesTextEdit()
+        self.comment_input.setMaximumHeight(60)
+        self.comment_input.setPlaceholderText("Global anteckning (delas över alla projekt)...")
+        # Read from 'global_notes' field (returned by DB query)
+        if self.article_data.get('global_notes'):
+            self.comment_input.setText(self.article_data.get('global_notes', ''))
+
+        # Verification checkbox
+        self.verify_checkbox = QCheckBox("Verifierad")
+        self.verify_checkbox.setChecked(self.is_verified)
+
+    def _setup_layout(self):
+        """Setup layout for the card."""
+        main_layout = QVBoxLayout()
+
+        # Header
+        main_layout.addWidget(self.article_header)
+        main_layout.addWidget(self.description_label)
+
+        # Charge status if multiple charges
+        if self.charge_status:
+            main_layout.addWidget(self.charge_status)
+
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        main_layout.addWidget(separator)
+
+        # Data fields
+        data_layout = QVBoxLayout()
+
+        # Batch number with selector
+        batch_layout = QHBoxLayout()
+        batch_layout.addWidget(self.batch_label)
+        batch_layout.addWidget(self.batch_selector)
+        data_layout.addLayout(batch_layout)
+
+        # Charge number with selector
+        charge_layout = QHBoxLayout()
+        charge_layout.addWidget(self.charge_label)
+        charge_layout.addWidget(self.charge_selector)
+        data_layout.addLayout(charge_layout)
 
         # Quantity
-        qty = self.article.get("quantity", 0.0)
-        qty_label = QLabel(f"Antal: {qty:.1f}")
-        header_layout.addWidget(qty_label)
+        quantity_layout = QHBoxLayout()
+        quantity_layout.addWidget(self.quantity_label)
+        quantity_layout.addWidget(self.quantity_input)
+        quantity_layout.addStretch()
+        data_layout.addLayout(quantity_layout)
 
-        info_layout.addLayout(header_layout)
+        # Certificate manager
+        data_layout.addWidget(self.certificate_manager)
 
-        # Description
-        desc = self.article.get("global_description", self.article.get("description", ""))
-        if desc:
-            desc_label = QLabel(desc)
-            desc_label.setWordWrap(True)
-            info_layout.addWidget(desc_label)
+        main_layout.addLayout(data_layout)
 
-        # Level + Charge
-        details_layout = QHBoxLayout()
+        # Comment
+        main_layout.addWidget(self.comment_label)
+        main_layout.addWidget(self.comment_input)
 
-        level = self.article.get("level", "")
-        if level:
-            level_label = QLabel(f"Nivå: {level}")
-            details_layout.addWidget(level_label)
+        # Verification
+        main_layout.addWidget(self.verify_checkbox)
 
-        charge = self.article.get("charge_number", "")
-        if charge:
-            charge_label = QLabel(f"Charge: {charge}")
-            details_layout.addWidget(charge_label)
+        self.setLayout(main_layout)
+
+    def _connect_signals(self):
+        """Connect signals for auto-save."""
+        # Verified checkbox - save immediately
+        self.verify_checkbox.toggled.connect(self._on_verify_toggled)
+
+        # Other fields - save when editing finished
+        self.batch_selector.batch_changed.connect(self._on_batch_changed)
+        self.charge_selector.charge_changed.connect(self._on_charge_changed)
+        self.quantity_input.editingFinished.connect(self._on_field_changed)
+
+        # Global notes - save on focus loss (blur)
+        self.comment_input.focus_lost.connect(self._on_notes_blur)
+
+        # Certificate changes
+        self.certificate_manager.certificate_added.connect(self._on_field_changed)
+
+    def _on_verify_toggled(self, checked: bool):
+        """Handle verification checkbox toggle."""
+        self.is_verified = checked
+        self.setProperty("verified", str(checked).lower())
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        # Emit signals
+        self.verified_changed.emit(checked)
+        self.save_required.emit()
+
+    def _on_batch_changed(self, batch: str):
+        """Handle batch selector change."""
+        self.article_data['batch_number'] = batch
+        self.save_required.emit()
+
+    def _on_charge_changed(self, charge: str):
+        """Handle charge selector change."""
+        self.article_data['charge_number'] = charge
+        self.save_required.emit()
+
+    def _on_field_changed(self):
+        """Handle any field change - emit save signal."""
+        self.save_required.emit()
+
+    def _on_notes_blur(self, notes_text: str):
+        """
+        Handle notes field focus loss.
+
+        Emits notes_changed signal for parent to save globally.
+
+        Args:
+            notes_text: Current notes text
+        """
+        article_number = self.article_data.get('article_number', '')
+        if article_number:
+            logger.debug(f"Notes changed for {article_number} (length: {len(notes_text)})")
+            self.notes_changed.emit(article_number, notes_text)
         else:
-            no_charge_label = QLabel("(Ingen charge)")
-            no_charge_label.setStyleSheet("color: red;")
-            details_layout.addWidget(no_charge_label)
+            logger.warning("Cannot save notes - article_number missing")
 
-        details_layout.addStretch()
-        info_layout.addLayout(details_layout)
+    def get_article_data(self) -> Dict[str, Any]:
+        """
+        Get updated article data.
 
-        info_frame.setLayout(info_layout)
-        layout.addWidget(info_frame)
+        Returns:
+            Dict with all current field values
+        """
+        self.article_data.update({
+            'batch_number': self.batch_selector.get_value(),
+            'charge_number': self.charge_selector.get_value(),
+            'quantity': self.quantity_input.value(),
+            'global_notes': self.comment_input.toPlainText(),  # Global notes field
+            'certificates': self.certificate_manager.selected_files,
+            'verified': self.is_verified
+        })
+        return self.article_data
 
-        # Notes section
-        notes_group = QGroupBox("Anteckningar (delas globalt)")
-        notes_layout = QVBoxLayout()
+    def get_article_id(self) -> str:
+        """Get unique ID for this article."""
+        return self.article_data.get('article_number', '') or self.article_data.get('id', '')
 
-        self.notes_edit = QTextEdit()
-        self.notes_edit.setPlaceholderText(
-            "Anteckningar för denna artikel (delas mellan alla projekt)..."
-        )
-        self.notes_edit.setMaximumHeight(100)
-        self.notes_edit.textChanged.connect(self._on_notes_changed)
-        notes_layout.addWidget(self.notes_edit)
+    def set_verified(self, verified: bool):
+        """
+        Set verification status programmatically.
 
-        # Notes hint
-        hint_label = QLabel("💡 Anteckningar sparas automatiskt efter 1.5 sekunder")
-        hint_label.setStyleSheet("color: #666666; font-size: 9pt;")
-        notes_layout.addWidget(hint_label)
-
-        notes_group.setLayout(notes_layout)
-        layout.addWidget(notes_group)
-
-        self.setLayout(layout)
-
-    def _load_notes(self):
-        """Load notes from database."""
-        try:
-            notes = self.article.get("global_notes", "")
-            if notes:
-                # Block signals to avoid triggering save
-                self.notes_edit.blockSignals(True)
-                self.notes_edit.setText(notes)
-                self.notes_edit.blockSignals(False)
-
-        except Exception as e:
-            logger.exception("Failed to load notes")
-
-    def _on_notes_changed(self):
-        """Handle notes text changed - start debounce timer."""
-        # Restart timer on each change (debounce)
-        self.save_timer.start(1500)  # 1.5 seconds
-
-    def _save_notes(self):
-        """Save notes to database (called after debounce)."""
-        try:
-            notes = self.notes_edit.toPlainText().strip()
-
-            # Update via operation
-            success = update_article_notes(
-                db=self.database,
-                article_number=self.article["article_number"],
-                notes=notes,
-                changed_by=self.user_name,
-            )
-
-            if success:
-                logger.info(
-                    f"Saved notes for {self.article['article_number']} "
-                    f"({len(notes)} chars)"
-                )
-            else:
-                logger.warning(f"Failed to save notes for {self.article['article_number']}")
-
-        except DatabaseError as e:
-            logger.error(f"Database error saving notes: {e}")
-
-        except Exception as e:
-            logger.exception("Unexpected error saving notes")
-
-    def get_article_number(self) -> str:
-        """Get article number."""
-        return self.article["article_number"]
-
-    def refresh_notes(self):
-        """Refresh notes from database (useful after external update)."""
-        try:
-            global_article = self.database.get_global_article(
-                self.article["article_number"]
-            )
-            if global_article:
-                notes = global_article.get("notes", "")
-                self.notes_edit.blockSignals(True)
-                self.notes_edit.setText(notes)
-                self.notes_edit.blockSignals(False)
-
-        except Exception as e:
-            logger.exception("Failed to refresh notes")
+        Args:
+            verified: True to mark as verified
+        """
+        self.is_verified = verified
+        self.verify_checkbox.setChecked(verified)
+        self.setProperty("verified", str(verified).lower())
+        self.style().unpolish(self)
+        self.style().polish(self)

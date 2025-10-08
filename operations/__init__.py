@@ -18,6 +18,7 @@ from .process_ops import (
     get_matching_summary,
     get_unmatched_articles,
     get_articles_needing_manual_selection,
+    compare_import_with_existing,
 )
 
 from .certificate_ops import (
@@ -34,6 +35,7 @@ from .certificate_ops import (
 from .article_ops import (
     update_article_notes,
     get_articles_for_project,
+    populate_articles_with_certificates,
     get_notes_history,
     get_articles_with_notes,
 )
@@ -44,13 +46,14 @@ from .update_ops import (
     get_update_summary,
     filter_updates_by_field,
     get_articles_with_updates,
+    find_removed_articles,
+    remove_articles_from_project,
 )
 
 from .report_ops import (
     generate_material_specification_html,
-    generate_pdf_report,
-    merge_certificates_into_report,
-    create_table_of_contents,
+    create_toc_cover_html,
+    generate_report_with_toc,
     get_report_summary,
     filter_articles_by_charge_status,
 )
@@ -67,6 +70,7 @@ __all__ = [
     "get_matching_summary",
     "get_unmatched_articles",
     "get_articles_needing_manual_selection",
+    "compare_import_with_existing",
     # Certificate Operations
     "guess_certificate_type",
     "validate_certificate_file",
@@ -79,6 +83,7 @@ __all__ = [
     # Article Operations
     "update_article_notes",
     "get_articles_for_project",
+    "populate_articles_with_certificates",
     "get_notes_history",
     "get_articles_with_notes",
     # Update Operations
@@ -87,11 +92,12 @@ __all__ = [
     "get_update_summary",
     "filter_updates_by_field",
     "get_articles_with_updates",
+    "find_removed_articles",
+    "remove_articles_from_project",
     # Report Operations
     "generate_material_specification_html",
-    "generate_pdf_report",
-    "merge_certificates_into_report",
-    "create_table_of_contents",
+    "create_toc_cover_html",
+    "generate_report_with_toc",
     "get_report_summary",
     "filter_articles_by_charge_status",
 ]

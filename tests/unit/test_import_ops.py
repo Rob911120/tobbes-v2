@@ -135,7 +135,7 @@ def test_import_lagerlogg_skips_invalid_rows(tmp_path):
     file_path = tmp_path / "invalid_inventory.xlsx"
     df = pd.DataFrame({
         "Artikelnummer": ["ART-001", "", "ART-003"],  # Empty article
-        "Chargenummer": ["CHG-A", "CHG-B", ""],  # Empty charge
+        "Chargenummer": ["CHG-A", "CHG-B", ""],  # Empty charge (allowed for admin posts)
         "Antal": [100.0, 50.0, 75.0],
         "Plats": ["A", "B", "C"],
         "Batch": ["1", "2", "3"],
@@ -144,9 +144,12 @@ def test_import_lagerlogg_skips_invalid_rows(tmp_path):
 
     inventory = import_lagerlogg(file_path)
 
-    # Should skip rows with missing article or charge
-    assert len(inventory) == 1
+    # Should skip rows with missing article but allow empty charges
+    assert len(inventory) == 2
     assert inventory[0]["article_number"] == "ART-001"
+    assert inventory[0]["charge_number"] == "CHG-A"
+    assert inventory[1]["article_number"] == "ART-003"
+    assert inventory[1]["charge_number"] == ""  # Empty charge allowed
 
 
 def test_import_lagerlogg_raises_if_no_valid_items(tmp_path):

@@ -340,3 +340,167 @@ def get_articles_with_updates(
     """
     article_numbers = {update.article_number for update in updates}
     return sorted(article_numbers)
+
+
+def find_removed_articles(
+    current_articles: List[Dict[str, Any]],
+    new_data: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Find articles that exist in project but NOT in new data.
+
+    These articles are candidates for removal from the project when
+    applying updates from a new nivålista.
+
+    Args:
+        current_articles: Current project articles (from get_articles_for_project)
+        new_data: New data (from import_nivalista or import_lagerlogg)
+
+    Returns:
+        List of article dicts with extra fields:
+        - 'removal_safe': bool (True if no certs/verification)
+        - 'has_certificates': bool
+        - 'verified': bool
+
+    Example:
+        >>> current = get_articles_for_project(db, project_id=1)
+        >>> new_data = import_nivalista("updated_nivalista.xlsx")
+        >>> removed = find_removed_articles(current, new_data)
+        >>> print(f"Found {len(removed)} articles to remove")
+        >>> for article in removed:
+        ...     if not article['removal_safe']:
+        ...         print(f"WARNING: {article['article_number']} has certificates!")
+    """
+    # Create lookup set of article numbers in new data
+    new_article_numbers = {
+        item.get("article_number")
+        for item in new_data
+        if item.get("article_number")
+    }
+
+    removed_articles = []
+
+    for article in current_articles:
+        article_num = article.get("article_number")
+        if not article_num:
+            continue
+
+        # Check if article exists in new data
+        if article_num not in new_article_numbers:
+            # Article is in project but not in new data - candidate for removal
+
+            # Check if safe to remove
+            certificates = article.get("certificates", [])
+            has_certs = len(certificates) > 0
+            is_verified = article.get("verified", False)
+
+            # Article is safe to remove if it has no certificates and is not verified
+            removal_safe = not (has_certs or is_verified)
+
+            removed_articles.append({
+                **article,
+                "removal_safe": removal_safe,
+                "has_certificates": has_certs,
+                "verified": is_verified,
+            })
+
+    logger.info(
+        f"Found {len(removed_articles)} articles in project but not in new data "
+        f"(safe to remove: {sum(1 for a in removed_articles if a['removal_safe'])})"
+    )
+
+    return removed_articles
+
+
+def remove_articles_from_project(
+    db: DatabaseInterface,
+    project_id: int,
+    article_numbers: List[str],
+) -> Dict[str, Any]:
+    """
+    Remove articles from project (with cascading deletes).
+
+    This will delete:
+    1. All certificates associated with the articles
+    2. The project_article records
+
+    NOTE: Global article data is preserved (other projects might use it).
+
+    Args:
+        db: Database instance (injected)
+        project_id: Project ID
+        article_numbers: List of article numbers to remove
+
+    Returns:
+        Dict with summary:
+        - removed_count: Number of articles removed
+        - certificates_deleted: Number of certificates deleted
+        - errors: List of error messages (if any)
+
+    Raises:
+        DatabaseError: If removal fails
+
+    Example:
+        >>> removed = find_removed_articles(current, new_data)
+        >>> selected = [a['article_number'] for a in removed if a['removal_safe']]
+        >>> result = remove_articles_from_project(db, project_id=1, selected)
+        >>> print(f"Removed {result['removed_count']} articles")
+    """
+    removed_count = 0
+    certificates_deleted = 0
+    errors = []
+
+    try:
+        for article_num in article_numbers:
+            try:
+                # 1. Delete certificates first (prevent orphans)
+                certs = db.get_certificates_for_article(
+                    project_id=project_id,
+                    article_number=article_num
+                )
+
+                for cert in certs:
+                    db.delete_certificate(cert["id"])
+                    certificates_deleted += 1
+
+                logger.info(
+                    f"Deleted {len(certs)} certificates for {article_num}"
+                )
+
+                # 2. Delete article from project
+                success = db.delete_project_article(
+                    project_id=project_id,
+                    article_number=article_num
+                )
+
+                if success:
+                    removed_count += 1
+                    logger.info(f"Removed article {article_num} from project {project_id}")
+                else:
+                    errors.append(f"Failed to remove {article_num} (not found?)")
+
+            except Exception as e:
+                error_msg = f"Failed to remove {article_num}: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+
+        logger.info(
+            f"Removed {removed_count}/{len(article_numbers)} articles "
+            f"(deleted {certificates_deleted} certificates)"
+        )
+
+        return {
+            "removed_count": removed_count,
+            "certificates_deleted": certificates_deleted,
+            "errors": errors,
+        }
+
+    except Exception as e:
+        logger.exception("Error during remove_articles_from_project")
+        raise DatabaseError(
+            f"Failed to remove articles: {e}",
+            details={
+                "project_id": project_id,
+                "article_count": len(article_numbers)
+            }
+        )

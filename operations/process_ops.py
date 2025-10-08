@@ -14,8 +14,8 @@ from typing import List, Dict, Any, Optional
 
 from domain.models import Article, InventoryItem, MatchResult
 from domain.rules import (
-    find_best_charge_match,
     get_available_charges,
+    get_available_batches,
     calculate_match_statistics,
 )
 
@@ -106,47 +106,62 @@ def _match_single_article(
     auto_match_single: bool = True,
 ) -> MatchResult:
     """
-    Match a single article with inventory charges.
+    Match a single article with inventory charges and batches.
 
     Helper function for match_articles_with_charges.
+
+    NO auto-match when multiple values! User must always choose.
+    Auto-match ONLY when exactly 1 charge or 1 batch available.
 
     Args:
         article: Article to match
         inventory_items: Available inventory items
-        auto_match_single: Auto-select if only one charge available
+        auto_match_single: Auto-select if only one charge/batch available
 
     Returns:
-        MatchResult with available charges and selected charge (if auto-matched)
+        MatchResult with available charges/batches and selected values (if auto-matched)
     """
-    # Get all available charges for this article
+    # Get all available charges and batches for this article
     available_charges = get_available_charges(article, inventory_items)
+    available_batches = get_available_batches(article, inventory_items)
 
-    # Determine if we should auto-match
+    # Auto-match logic: ONLY if exactly 1 option
     selected_charge = None
+    selected_batch = None
     auto_matched = False
 
     if len(available_charges) == 1 and auto_match_single:
         # Only one charge available - auto-select it
         selected_charge = available_charges[0]
         auto_matched = True
-        logger.debug(f"Auto-matched {article.article_number} → {selected_charge}")
+        logger.debug(f"Auto-matched charge {article.article_number} → {selected_charge}")
 
-    elif len(available_charges) > 1:
-        # Multiple charges - try to find best match
-        best_charge = find_best_charge_match(article, inventory_items)
-        if best_charge and auto_match_single:
-            selected_charge = best_charge
-            auto_matched = True
-            logger.debug(
-                f"Auto-matched {article.article_number} → {selected_charge} "
-                f"(best of {len(available_charges)} options)"
-            )
+    if len(available_batches) == 1 and auto_match_single:
+        # Only one batch available - auto-select it
+        selected_batch = available_batches[0]
+        auto_matched = True
+        logger.debug(f"Auto-matched batch {article.article_number} → {selected_batch}")
+
+    # Multiple charges/batches → Yellow field, user MUST choose
+    if len(available_charges) > 1:
+        logger.debug(
+            f"{article.article_number} has {len(available_charges)} charges - "
+            f"user must select (yellow field)"
+        )
+
+    if len(available_batches) > 1:
+        logger.debug(
+            f"{article.article_number} has {len(available_batches)} batches - "
+            f"user must select (yellow field)"
+        )
 
     # Create match result
     result = MatchResult(
         article=article,
         available_charges=available_charges,
+        available_batches=available_batches,
         selected_charge=selected_charge,
+        selected_batch=selected_batch,
         auto_matched=auto_matched,
     )
 
@@ -155,37 +170,56 @@ def _match_single_article(
 
 def apply_charge_selection(
     match_result: MatchResult,
-    selected_charge: str,
+    selected_charge: str = None,
+    selected_batch: str = None,
 ) -> MatchResult:
     """
-    Apply manual charge selection to a match result.
+    Apply manual charge and/or batch selection to a match result.
 
-    Used when user manually selects a charge from available options.
+    Used when user manually selects a charge/batch from available options.
 
     Args:
         match_result: Original match result
-        selected_charge: Charge number selected by user
+        selected_charge: Charge number selected by user (optional)
+        selected_batch: Batch number selected by user (optional)
 
     Returns:
-        Updated MatchResult with selected charge
+        Updated MatchResult with selected charge/batch
 
     Raises:
-        ValueError: If selected charge is not in available charges
+        ValueError: If selected value is not in available options
     """
-    if selected_charge not in match_result.available_charges:
-        raise ValueError(
-            f"Selected charge '{selected_charge}' not in available charges: "
-            f"{match_result.available_charges}"
+    if selected_charge is not None:
+        if selected_charge not in match_result.available_charges:
+            raise ValueError(
+                f"Selected charge '{selected_charge}' not in available charges: "
+                f"{match_result.available_charges}"
+            )
+
+        # Update article with selected charge
+        match_result.article.charge_number = selected_charge
+        match_result.selected_charge = selected_charge
+        match_result.auto_matched = False  # This was manual selection
+
+        logger.info(
+            f"Applied manual charge selection: {match_result.article.article_number} → {selected_charge}"
         )
 
-    # Update article with selected charge
-    match_result.article.charge_number = selected_charge
-    match_result.selected_charge = selected_charge
-    match_result.auto_matched = False  # This was manual selection
+    if selected_batch is not None:
+        if selected_batch not in match_result.available_batches:
+            raise ValueError(
+                f"Selected batch '{selected_batch}' not in available batches: "
+                f"{match_result.available_batches}"
+            )
 
-    logger.info(
-        f"Applied manual selection: {match_result.article.article_number} → {selected_charge}"
-    )
+        # Update article with selected batch
+        match_result.article.batch_number = selected_batch
+        match_result.selected_batch = selected_batch
+        match_result.auto_matched = False  # This was manual selection
+
+        logger.info(
+            f"Applied manual batch selection: {match_result.article.article_number} → {selected_batch}"
+        )
 
     return match_result
 
@@ -251,3 +285,201 @@ def get_articles_needing_manual_selection(match_results: List[MatchResult]) -> L
         List of MatchResult objects needing manual selection
     """
     return [r for r in match_results if r.needs_manual_selection]
+
+
+def compare_import_with_existing(
+    existing_articles: List[Dict[str, Any]],
+    new_articles: List[Dict[str, Any]],
+    new_inventory: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Compare existing project articles with new import data.
+
+    Returns a unified diff showing what will change if import is applied.
+    Used for both first-time import (all "new") and re-import (diff).
+
+    **Smart Re-import Logic:**
+    - Lagerlogg: Update charge/batch ONLY on non-verified articles
+    - Nivålista: Detect structure changes (levels, removed articles)
+
+    Args:
+        existing_articles: Current articles in project (from DB)
+        new_articles: Articles from new nivålista file
+        new_inventory: Inventory items from new lagerlogg file
+
+    Returns:
+        Dict with diff structure:
+        {
+            'new': [...],           # New articles (green)
+            'updated': [{           # Updated articles (yellow if not verified, gray if verified)
+                'article': {...},
+                'changes': {
+                    'charge': {'old': 'C1', 'new': 'C2'},
+                    'batch': {'old': 'B1', 'new': 'B2'},
+                    'level': {'old': '1', 'new': '2'},
+                    'quantity': {'old': 10, 'new': 20}
+                },
+                'is_verified': True/False,
+                'can_update': True/False  # False if verified
+            }],
+            'removed': [...],       # Articles removed from nivålista (red)
+            'unchanged': [...]      # No changes
+        }
+
+    Example:
+        >>> existing = db.get_articles_for_project(1)
+        >>> new_articles = import_nivalista("updated_nivalista.xlsx")
+        >>> new_inventory = import_lagerlogg("updated_lagerlogg.xlsx")
+        >>> diff = compare_import_with_existing(existing, new_articles, new_inventory)
+        >>> print(f"New: {len(diff['new'])}, Updated: {len(diff['updated'])}")
+    """
+    # If no existing articles, everything is "new"
+    if not existing_articles:
+        logger.info("First import - all articles are new")
+        return {
+            'new': new_articles,
+            'updated': [],
+            'removed': [],
+            'unchanged': []
+        }
+
+    # Create lookups
+    existing_lookup = {
+        a['article_number']: a for a in existing_articles
+    }
+    new_lookup = {
+        a['article_number']: a for a in new_articles
+    }
+
+    # Match new inventory to get updated charges/batches
+    inventory_models = [
+        InventoryItem(
+            project_id=0,
+            article_number=i["article_number"],
+            charge_number=i["charge_number"],
+            quantity=i.get("quantity", 0.0),
+            batch_id=i.get("batch_id"),
+            location=i.get("location"),
+            received_date=i.get("received_date"),
+        )
+        for i in new_inventory
+    ]
+
+    new_articles_list = []
+    updated_articles = []
+    unchanged_articles = []
+    removed_articles = []
+
+    # Check each article from new nivålista
+    for article_num, new_article in new_lookup.items():
+        existing = existing_lookup.get(article_num)
+
+        if not existing:
+            # NEW article - not in existing project
+            # Match with inventory to get charge/batch
+            article_model = Article(
+                project_id=0,
+                article_number=article_num,
+                description=new_article.get('description', ''),
+                quantity=new_article.get('quantity', 0.0),
+                level=new_article.get('level', ''),
+            )
+
+            available_charges = get_available_charges(article_model, inventory_models)
+            available_batches = get_available_batches(article_model, inventory_models)
+
+            # Auto-select if only 1 option
+            if len(available_charges) == 1:
+                new_article['charge_number'] = available_charges[0]
+            if len(available_batches) == 1:
+                new_article['batch_number'] = available_batches[0]
+
+            new_articles_list.append(new_article)
+            continue
+
+        # Article exists - check for changes
+        changes = {}
+
+        # Compare nivålista fields (level, quantity, description)
+        if new_article.get('level') != existing.get('level'):
+            changes['level'] = {
+                'old': existing.get('level', ''),
+                'new': new_article.get('level', '')
+            }
+
+        if new_article.get('quantity') != existing.get('quantity'):
+            changes['quantity'] = {
+                'old': existing.get('quantity', 0.0),
+                'new': new_article.get('quantity', 0.0)
+            }
+
+        # Compare charge/batch from new inventory
+        # Get new charge/batch for this article
+        article_model = Article(
+            project_id=0,
+            article_number=article_num,
+            description=new_article.get('description', ''),
+            quantity=new_article.get('quantity', 0.0),
+            level=new_article.get('level', ''),
+        )
+
+        available_charges = get_available_charges(article_model, inventory_models)
+        available_batches = get_available_batches(article_model, inventory_models)
+
+        # Auto-select if only 1 option
+        new_charge = available_charges[0] if len(available_charges) == 1 else None
+        new_batch = available_batches[0] if len(available_batches) == 1 else None
+
+        # FIX: Add charge/batch to article dict so they're saved correctly
+        if new_charge:
+            new_article['charge_number'] = new_charge
+        if new_batch:
+            new_article['batch_number'] = new_batch
+
+        if new_charge and new_charge != existing.get('charge_number'):
+            changes['charge'] = {
+                'old': existing.get('charge_number', ''),
+                'new': new_charge
+            }
+
+        if new_batch and new_batch != existing.get('batch_number'):
+            changes['batch'] = {
+                'old': existing.get('batch_number', ''),
+                'new': new_batch
+            }
+
+        # Determine if article can be updated
+        is_verified = existing.get('verified', False)
+        can_update = not is_verified  # Can only update non-verified articles
+
+        if changes:
+            # Article has changes
+            updated_articles.append({
+                'article': new_article,
+                'article_number': article_num,
+                'changes': changes,
+                'is_verified': is_verified,
+                'can_update': can_update,
+                'available_charges': available_charges,
+                'available_batches': available_batches,
+            })
+        else:
+            # No changes
+            unchanged_articles.append(new_article)
+
+    # Find removed articles (in existing but not in new nivålista)
+    for article_num, existing_article in existing_lookup.items():
+        if article_num not in new_lookup:
+            removed_articles.append(existing_article)
+
+    logger.info(
+        f"Diff: {len(new_articles_list)} new, {len(updated_articles)} updated, "
+        f"{len(removed_articles)} removed, {len(unchanged_articles)} unchanged"
+    )
+
+    return {
+        'new': new_articles_list,
+        'updated': updated_articles,
+        'removed': removed_articles,
+        'unchanged': unchanged_articles,
+    }

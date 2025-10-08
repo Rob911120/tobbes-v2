@@ -77,14 +77,17 @@ CREATE INDEX IF NOT EXISTS idx_inventory_project_article ON inventory_items(proj
 
 -- ==================== Certificates Table ====================
 -- Stores certificates/PDF files for articles
+-- Consolidated schema (includes fields from migrations 006 and 007)
 CREATE TABLE IF NOT EXISTS certificates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL,
     article_number TEXT NOT NULL,
+    certificate_id TEXT NOT NULL,  -- Unique certificate identifier (e.g., "ART_12345_Materialintyg_20250108_143022")
     certificate_type TEXT NOT NULL,  -- e.g., "Materialintyg", "Svetslogg"
-    file_path TEXT NOT NULL,  -- Relative path to certificate file
-    original_filename TEXT NOT NULL,
-    page_count INTEGER DEFAULT 1,
+    stored_path TEXT NOT NULL,  -- Full absolute path to stored certificate file
+    stored_name TEXT NOT NULL,  -- Filename in storage (with certificate_id)
+    original_name TEXT NOT NULL,  -- Original filename when uploaded
+    page_count INTEGER DEFAULT 0,
     project_article_id INTEGER,  -- Optional FK to project_articles
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -97,3 +100,4 @@ CREATE INDEX IF NOT EXISTS idx_certificates_project ON certificates(project_id);
 CREATE INDEX IF NOT EXISTS idx_certificates_article ON certificates(article_number);
 CREATE INDEX IF NOT EXISTS idx_certificates_type ON certificates(certificate_type);
 CREATE INDEX IF NOT EXISTS idx_certificates_project_article ON certificates(project_id, article_number);
+CREATE INDEX IF NOT EXISTS idx_certificates_cert_id ON certificates(certificate_id);

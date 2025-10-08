@@ -57,26 +57,69 @@ class SQLiteDatabase(DatabaseInterface):
         return [dict(row) for row in rows]
 
     def _run_migrations(self):
-        """Run all SQL migration files in order."""
+        """
+        Run all SQL migration files in order, tracking which have been applied.
+
+        Uses schema_migrations table to track applied migrations and prevent
+        re-running destructive migrations (like 007_rebuild_certificates.sql).
+        """
         migrations_dir = Path(__file__).parent / "migrations"
         migration_files = sorted(migrations_dir.glob("*.sql"))
 
+        # Step 1: Ensure migration tracking table exists
+        # Run 000_migration_tracking.sql first if it exists
+        tracking_migration = migrations_dir / "000_migration_tracking.sql"
+        if tracking_migration.exists():
+            sql = tracking_migration.read_text()
+            self.conn.executescript(sql)
+            self.conn.commit()
+
+        # Step 2: Get list of already-applied migrations
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT migration_name FROM schema_migrations")
+        applied_migrations = {row[0] for row in cursor.fetchall()}
+
+        # Step 3: Run each migration that hasn't been applied yet
+        migrations_run = 0
         for migration_file in migration_files:
-            logger.debug(f"Running migration: {migration_file.name}")
+            migration_name = migration_file.name
+
+            # Skip if already applied
+            if migration_name in applied_migrations:
+                logger.debug(f"Skipping already-applied migration: {migration_name}")
+                continue
+
+            logger.debug(f"Running migration: {migration_name}")
             sql = migration_file.read_text()
 
             try:
+                # Execute migration
                 self.conn.executescript(sql)
+
+                # Record as applied
+                cursor.execute(
+                    "INSERT INTO schema_migrations (migration_name) VALUES (?)",
+                    (migration_name,)
+                )
+                self.conn.commit()
+                migrations_run += 1
+                logger.info(f"✅ Applied migration: {migration_name}")
+
             except sqlite3.OperationalError as e:
                 # Handle idempotent migrations (e.g., duplicate column)
                 if "duplicate column" in str(e).lower():
-                    logger.warning(f"Migration {migration_file.name} already applied (columns exist) - skipping")
+                    logger.warning(f"Migration {migration_name} already applied (columns exist) - marking as applied")
+                    # Mark as applied even though it failed (schema already correct)
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO schema_migrations (migration_name) VALUES (?)",
+                        (migration_name,)
+                    )
+                    self.conn.commit()
                 else:
                     # Re-raise other operational errors
                     raise
 
-        self.conn.commit()
-        logger.info(f"Executed {len(migration_files)} migrations")
+        logger.info(f"Migration summary: {migrations_run} new, {len(applied_migrations)} already applied")
 
     # ==================== Project Operations ====================
 
@@ -229,6 +272,7 @@ class SQLiteDatabase(DatabaseInterface):
                         article.get("level", ""),
                         article.get("parent_article"),
                         article.get("charge_number"),
+                        article.get("batch_number"),
                     ),
                 )
 
@@ -299,6 +343,25 @@ class SQLiteDatabase(DatabaseInterface):
         self.conn.commit()
         return cursor.rowcount > 0
 
+    def delete_project_article(
+        self,
+        project_id: int,
+        article_number: str,
+    ) -> bool:
+        """
+        Delete article from project.
+
+        NOTE: This only removes the project_article record.
+        Global article data is preserved (other projects might use it).
+        Certificates should be deleted separately before calling this.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            Q.DELETE_PROJECT_ARTICLE, (project_id, article_number)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     # ==================== Inventory Operations ====================
 
     def save_inventory_items(
@@ -325,11 +388,66 @@ class SQLiteDatabase(DatabaseInterface):
                 )
 
             self.conn.commit()
+
+            # Sync charge/batch numbers from inventory to project_articles
+            self._sync_charges_from_inventory(project_id)
+
             return True
 
         except Exception as e:
             self.conn.rollback()
             raise DatabaseError(f"Failed to save inventory items: {e}")
+
+    def _sync_charges_from_inventory(self, project_id: int) -> None:
+        """
+        Sync charge and batch numbers from inventory_items to project_articles.
+
+        After lagerlogg is imported, this updates project_articles with the latest
+        charge/batch info from inventory_items.
+
+        For each article:
+        - Finds the most recent inventory item (by received_date)
+        - Updates project_articles with that charge_number and batch_id
+        """
+        try:
+            cursor = self.conn.cursor()
+
+            # Get distinct article numbers from inventory for this project
+            cursor.execute("""
+                SELECT DISTINCT article_number
+                FROM inventory_items
+                WHERE project_id = ?
+            """, (project_id,))
+
+            articles = cursor.fetchall()
+
+            for (article_number,) in articles:
+                # Get most recent inventory item for this article
+                cursor.execute("""
+                    SELECT charge_number, batch_id
+                    FROM inventory_items
+                    WHERE project_id = ? AND article_number = ?
+                    ORDER BY received_date DESC, id DESC
+                    LIMIT 1
+                """, (project_id, article_number))
+
+                result = cursor.fetchone()
+                if result:
+                    charge_number, batch_id = result
+
+                    # Update project_articles with charge and batch
+                    cursor.execute(
+                        Q.UPDATE_ARTICLE_CHARGE_AND_BATCH,
+                        (charge_number, batch_id, project_id, article_number)
+                    )
+
+            self.conn.commit()
+            logger.debug(f"Synced charges/batches for {len(articles)} articles in project {project_id}")
+
+        except Exception as e:
+            logger.exception(f"Failed to sync charges from inventory: {e}")
+            # Don't raise - this is a best-effort sync
+            # Inventory is still saved even if sync fails
 
     def get_inventory_items(
         self,
@@ -351,37 +469,91 @@ class SQLiteDatabase(DatabaseInterface):
         rows = cursor.fetchall()
         return [row["charge_number"] for row in rows if row["charge_number"]]
 
+    def delete_inventory_items(
+        self,
+        project_id: int,
+    ) -> bool:
+        """Delete all inventory items for a project (prevent duplicates on re-import)."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(Q.DELETE_INVENTORY_ITEMS_FOR_PROJECT, (project_id,))
+            self.conn.commit()
+            deleted_count = cursor.rowcount
+            logger.info(f"Deleted {deleted_count} inventory items for project {project_id}")
+            return True
+        except Exception as e:
+            self.conn.rollback()
+            raise DatabaseError(f"Failed to delete inventory items: {e}")
+
     # ==================== Certificate Operations ====================
 
     def save_certificate(
         self,
         project_id: int,
         article_number: str,
-        certificate_type: str,
-        file_path: str,
-        original_filename: str,
-        page_count: int = 1,
+        certificate_id: str,
+        cert_type: str,
+        stored_path: str,
+        stored_name: str,
+        original_name: str,
+        page_count: int = 0,
         project_article_id: Optional[int] = None,
     ) -> int:
-        """Save a certificate for an article."""
+        """Save a certificate for an article with full storage metadata."""
+        logger.debug(f"💾 SQLiteDatabase.save_certificate() called:")
+        logger.debug(f"   project_id={project_id}, article={article_number}, cert_id={certificate_id}")
+
         try:
             cursor = self.conn.cursor()
+
+            # Execute INSERT
+            logger.debug(f"   Executing INSERT_CERTIFICATE...")
             cursor.execute(
                 Q.INSERT_CERTIFICATE,
                 (
                     project_id,
                     article_number,
-                    certificate_type,
-                    file_path,
-                    original_filename,
+                    certificate_id,
+                    cert_type,
+                    stored_path,
+                    stored_name,
+                    original_name,
                     page_count,
                     project_article_id,
                 ),
             )
+
+            # Get inserted row ID
+            inserted_id = cursor.lastrowid
+            logger.debug(f"   INSERT executed, lastrowid={inserted_id}")
+
+            # Commit transaction
+            logger.debug(f"   Calling commit()...")
             self.conn.commit()
-            return cursor.lastrowid
+            logger.debug(f"   ✅ Commit successful!")
+
+            # Verify that row was actually saved
+            cursor.execute(
+                "SELECT COUNT(*) FROM certificates WHERE id = ?",
+                (inserted_id,)
+            )
+            count = cursor.fetchone()[0]
+            logger.debug(f"   🔍 VERIFICATION: SELECT COUNT(*) WHERE id={inserted_id} → {count}")
+
+            if count == 0:
+                logger.error(f"   ❌ CRITICAL: Row with id={inserted_id} NOT found after commit!")
+                raise DatabaseError(f"Certificate row disappeared after commit (id={inserted_id})")
+
+            logger.info(f"✅ Certificate saved successfully: id={inserted_id}, cert_id={certificate_id}")
+            return inserted_id
+
+        except DatabaseError:
+            # Re-raise DatabaseError as-is
+            raise
 
         except Exception as e:
+            logger.exception(f"❌ Exception in save_certificate: {type(e).__name__}: {e}")
+            self.conn.rollback()  # Explicit rollback on error
             raise DatabaseError(f"Failed to save certificate: {e}")
 
     def get_certificates_for_article(

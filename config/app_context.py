@@ -57,25 +57,22 @@ class AppContext:
     app_version: str = field(default_factory=lambda: get_settings().app_version)
 
     # Working directories (from settings)
+    # NOTE: Reports and certificates are now stored per-project in projects/{project_id}/
+    # Use config.paths.get_project_reports_path(project_id) and get_project_certificates_path(project_id)
     @property
     def data_dir(self) -> Path:
         """Get data directory from settings."""
         return self.settings.data_dir
 
     @property
-    def reports_dir(self) -> Path:
-        """Get reports directory from settings."""
-        return self.settings.reports_dir
-
-    @property
-    def certificates_dir(self) -> Path:
-        """Get certificates directory from settings."""
-        return self.settings.certificates_dir
-
-    @property
     def temp_dir(self) -> Path:
         """Get temp directory from settings."""
         return self.settings.temp_dir
+
+    @property
+    def project_name(self) -> Optional[str]:
+        """Get current project name (alias for current_project_name)."""
+        return self.current_project_name
 
     def with_project(self, project_id: int, project_name: Optional[str] = None) -> "AppContext":
         """

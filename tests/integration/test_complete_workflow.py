@@ -21,7 +21,6 @@ from operations.report_ops import (
     generate_material_specification_html,
     get_report_summary,
 )
-from services.file_service import FileService
 from config.app_context import create_app_context
 
 
@@ -43,8 +42,8 @@ def app_context(test_db, tmp_path):
 
     settings = Settings(
         database_path=Path(":memory:"),
-        certificates_dir=tmp_path / "certificates",
-        reports_dir=tmp_path / "reports",
+        # NOTE: Reports and certificates are now stored per-project in projects/{project_id}/
+        # Use config.paths module for project-specific paths
     )
 
     return create_app_context(database=test_db, settings=settings)
@@ -221,6 +220,8 @@ def test_complete_workflow_end_to_end(
 
 def test_workflow_with_certificate_upload(app_context, sample_nivalista_data, tmp_path):
     """Test workflow with certificate upload."""
+    from services.certificate_service import create_certificate_service
+
     db = app_context.database
 
     # Create project and import articles
@@ -237,37 +238,26 @@ def test_workflow_with_certificate_upload(app_context, sample_nivalista_data, tm
     cert_file = tmp_path / "test_cert.pdf"
     cert_file.write_text("PDF certificate content")
 
-    # Upload certificate via FileService
-    file_service = FileService(app_context.settings.certificates_dir)
-    dest_path = file_service.copy_certificate(
-        source_path=cert_file,
+    # Upload certificate via CertificateService (matches production code)
+    cert_service = create_certificate_service()
+    result = cert_service.process_certificate(
+        original_path=cert_file,
+        article_num="ART-001",
+        cert_type="Materialintyg",
         project_id=project_id,
-        article_number="ART-001",
+        db=db
     )
 
-    # Save certificate to database
-    cert_id = db.save_certificate(
-        project_id=project_id,
-        article_number="ART-001",
-        certificate_type="Materialintyg",
-        file_path=str(dest_path),
-        original_filename="test_cert.pdf",
-        page_count=1,
-    )
-
-    assert cert_id is not None
+    assert result['success'] is True
+    cert_data = result['data']
+    assert cert_data['id'] is not None
 
     # Verify certificate was saved
     certs = db.get_certificates_for_article(project_id, "ART-001")
     assert len(certs) == 1
     # Database returns dicts
     assert certs[0]["certificate_type"] == "Materialintyg"
-    assert certs[0]["original_filename"] == "test_cert.pdf"
-
-    # Verify file was copied
-    assert dest_path.exists()
-    assert "project_1" in str(dest_path)
-    assert "article_ART-001" in str(dest_path)
+    assert certs[0]["original_name"] == "test_cert.pdf"
 
 
 def test_workflow_article_update_removes_certificates(
@@ -276,6 +266,8 @@ def test_workflow_article_update_removes_certificates(
     tmp_path,
 ):
     """Test that updating article charge removes certificates."""
+    from services.certificate_service import create_certificate_service
+
     db = app_context.database
 
     # Create project
@@ -292,25 +284,20 @@ def test_workflow_article_update_removes_certificates(
 
     db.save_project_articles(project_id, articles)
 
-    # Upload certificate
+    # Upload certificate via CertificateService (matches production code)
     cert_file = tmp_path / "cert.pdf"
     cert_file.write_text("PDF content")
 
-    file_service = FileService(app_context.settings.certificates_dir)
-    dest_path = file_service.copy_certificate(
-        source_path=cert_file,
+    cert_service = create_certificate_service()
+    result = cert_service.process_certificate(
+        original_path=cert_file,
+        article_num="ART-001",
+        cert_type="Materialintyg",
         project_id=project_id,
-        article_number="ART-001",
+        db=db
     )
 
-    db.save_certificate(
-        project_id=project_id,
-        article_number="ART-001",
-        certificate_type="Materialintyg",
-        file_path=str(dest_path),
-        original_filename="cert.pdf",
-        page_count=1,
-    )
+    assert result['success'] is True
 
     # Verify certificate exists
     certs_before = db.get_certificates_for_article(project_id, "ART-001")

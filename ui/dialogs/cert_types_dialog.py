@@ -64,35 +64,39 @@ class CertTypesDialog(QDialog):
 
         layout = QVBoxLayout()
 
-        # Global types section
-        global_group = QGroupBox("Globala certifikattyper")
-        global_layout = QVBoxLayout()
+        # Global types section (ONLY if no project_id - global mode)
+        if not self.project_id:
+            global_group = QGroupBox("Globala certifikattyper")
+            global_layout = QVBoxLayout()
 
-        global_label = QLabel("Dessa typer är tillgängliga för alla projekt:")
-        global_layout.addWidget(global_label)
+            global_label = QLabel("Dessa typer är tillgängliga för alla projekt:")
+            global_layout.addWidget(global_label)
 
-        self.global_list = QListWidget()
-        global_layout.addWidget(self.global_list)
+            self.global_list = QListWidget()
+            global_layout.addWidget(self.global_list)
 
-        # Global types buttons
-        global_buttons = QHBoxLayout()
+            # Global types buttons
+            global_buttons = QHBoxLayout()
 
-        self.btn_add_global = QPushButton("Lägg till")
-        self.btn_add_global.clicked.connect(self._add_global_type)
-        global_buttons.addWidget(self.btn_add_global)
+            self.btn_add_global = QPushButton("Lägg till")
+            self.btn_add_global.clicked.connect(self._add_global_type)
+            global_buttons.addWidget(self.btn_add_global)
 
-        self.btn_remove_global = QPushButton("Ta bort")
-        self.btn_remove_global.clicked.connect(self._remove_global_type)
-        self.btn_remove_global.setEnabled(False)
-        global_buttons.addWidget(self.btn_remove_global)
+            self.btn_remove_global = QPushButton("Ta bort")
+            self.btn_remove_global.clicked.connect(self._remove_global_type)
+            self.btn_remove_global.setEnabled(False)
+            global_buttons.addWidget(self.btn_remove_global)
 
-        global_buttons.addStretch()
-        global_layout.addLayout(global_buttons)
+            global_buttons.addStretch()
+            global_layout.addLayout(global_buttons)
 
-        global_group.setLayout(global_layout)
-        layout.addWidget(global_group)
+            global_group.setLayout(global_layout)
+            layout.addWidget(global_group)
 
-        # Project-specific types section (if project_id provided)
+            # Connect selection changed for global list
+            self.global_list.itemSelectionChanged.connect(self._on_global_selection_changed)
+
+        # Project-specific types section (ONLY if project_id provided)
         if self.project_id:
             project_group = QGroupBox("Projektspecifika certifikattyper")
             project_layout = QVBoxLayout()
@@ -131,24 +135,21 @@ class CertTypesDialog(QDialog):
 
         self.setLayout(layout)
 
-        # Connect selection changed for global list
-        self.global_list.itemSelectionChanged.connect(self._on_global_selection_changed)
-
     def _load_certificate_types(self):
         """Load certificate types from database."""
         try:
-            # Load global types
-            global_types = self.database.get_global_certificate_types()
-            self.global_list.clear()
-            self.global_list.addItems(global_types)
-
-            # Load project-specific types if project_id provided
-            if self.project_id and hasattr(self, 'project_list'):
-                project_types = self.database.get_project_certificate_types(self.project_id)
+            if not self.project_id:
+                # Global mode: Load only global types
+                global_types = self.database.get_certificate_types(None)
+                self.global_list.clear()
+                self.global_list.addItems(global_types)
+                logger.info(f"Loaded {len(global_types)} global certificate types")
+            else:
+                # Project mode: Load only project-specific types
+                project_types = self.database.get_certificate_types(self.project_id)
                 self.project_list.clear()
                 self.project_list.addItems(project_types)
-
-            logger.info(f"Loaded {len(global_types)} global certificate types")
+                logger.info(f"Loaded {len(project_types)} project certificate types")
 
         except Exception as e:
             logger.exception("Failed to load certificate types")
@@ -189,7 +190,7 @@ class CertTypesDialog(QDialog):
                     return
 
                 # Add to database
-                self.database.add_global_certificate_type(type_name)
+                self.database.add_certificate_type(type_name, None)
 
                 # Reload list
                 self._load_certificate_types()
@@ -231,7 +232,7 @@ class CertTypesDialog(QDialog):
                     return
 
                 # Add to database
-                self.database.add_project_certificate_type(self.project_id, type_name)
+                self.database.add_certificate_type(type_name, self.project_id)
 
                 # Reload list
                 self._load_certificate_types()
@@ -269,7 +270,7 @@ class CertTypesDialog(QDialog):
 
         if reply == QMessageBox.Yes:
             try:
-                self.database.remove_global_certificate_type(type_name)
+                self.database.delete_certificate_type(type_name, None)
 
                 # Reload list
                 self._load_certificate_types()
@@ -306,7 +307,7 @@ class CertTypesDialog(QDialog):
 
         if reply == QMessageBox.Yes:
             try:
-                self.database.remove_project_certificate_type(self.project_id, type_name)
+                self.database.delete_certificate_type(type_name, self.project_id)
 
                 # Reload list
                 self._load_certificate_types()

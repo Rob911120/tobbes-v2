@@ -1,10 +1,10 @@
 """
-Charge Selector Widget.
+Batch Selector Widget.
 
 Smart dropdown med färgkodning:
-- Grå: Manuell inmatning (inga val)
-- Grön: Matchad (ett val)
-- Gul: Val krävs (flera val)
+- Röd: Inget batch valt (kritiskt)
+- Grön: Batch vald (OK)
+- Gul: Flera val tillgängliga (användaren måste välja)
 """
 
 import logging
@@ -23,9 +23,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class ChargeSelector(QWidget):
+class BatchSelector(QWidget):
     """
-    Smart charge selector widget med färgkodning.
+    Smart batch selector widget med färgkodning.
 
     States:
     - RED (no value selected): Critical - must select
@@ -33,11 +33,11 @@ class ChargeSelector(QWidget):
     - YELLOW (multiple options): User selection required
 
     Signals:
-        charge_changed: Emitted when charge value changes
+        batch_changed: Emitted when batch value changes
     """
 
     # Signals
-    charge_changed = Signal(str)  # New charge value
+    batch_changed = Signal(str)  # New batch value
 
     # Color states
     COLOR_RED = "#dc3545"        # No value selected
@@ -46,18 +46,18 @@ class ChargeSelector(QWidget):
 
     def __init__(
         self,
-        available_charges: List[str],
+        available_batches: List[str],
         current_value: str = "",
         on_change: Optional[Callable[[str], None]] = None,
         parent=None
     ):
         """
-        Initialize charge selector.
+        Initialize batch selector.
 
         Args:
-            available_charges: List of available charge numbers
-            current_value: Current charge value
-            on_change: Optional callback when charge changes
+            available_batches: List of available batch numbers
+            current_value: Current batch value
+            on_change: Optional callback when batch changes
             parent: Parent widget
         """
         if not PYSIDE6_AVAILABLE:
@@ -65,7 +65,7 @@ class ChargeSelector(QWidget):
 
         super().__init__(parent)
 
-        self.available_charges = available_charges
+        self.available_batches = available_batches
         self.current_value = current_value
         self.on_change_callback = on_change
 
@@ -88,7 +88,7 @@ class ChargeSelector(QWidget):
         self.combo.currentTextChanged.connect(self._on_combo_changed)
         layout.addWidget(self.combo)
 
-        # Count label for multiple charges
+        # Count label for multiple batches
         self.count_label = QLabel()
         self.count_label.setStyleSheet("color: #666; font-size: 11px; margin-left: 4px;")
         self.count_label.setVisible(False)
@@ -97,18 +97,18 @@ class ChargeSelector(QWidget):
         self.setLayout(layout)
 
     def _apply_state(self):
-        """Apply color state based on available charges and current value."""
+        """Apply color state based on available batches and current value."""
         # Priority 1: If we HAVE a value - always green! (regardless of available options)
         if self.current_value:
             self._set_green_state_with_value()
             return
 
         # Priority 2: No value - check available options
-        num_charges = len(self.available_charges)
+        num_batches = len(self.available_batches)
 
-        if num_charges == 0:
+        if num_batches == 0:
             self._set_red_state()
-        elif num_charges == 1:
+        elif num_batches == 1:
             self._set_green_state()
         else:
             # Multiple options - needs selection
@@ -118,7 +118,7 @@ class ChargeSelector(QWidget):
         """Set red state (no value selected - critical)."""
         self.combo.clear()
         self.combo.setEditable(True)
-        self.combo.setPlaceholderText("Ange chargenummer manuellt...")
+        self.combo.setPlaceholderText("Ange batchnummer manuellt...")
 
         if self.current_value:
             self.combo.setCurrentText(self.current_value)
@@ -126,14 +126,14 @@ class ChargeSelector(QWidget):
         # Always add "Manual entry" option
         self.combo.addItem("-- Ange manuellt --")
 
-        self._set_status_icon("✗", "Inget charge valt", "red")
+        self._set_status_icon("✗", "Inget batch valt", "red")
         self._set_combo_style("#ffe6e6", "#dc3545")
         self.count_label.setVisible(False)
 
     def _set_green_state(self):
-        """Set green state (single option - auto-matched)."""
+        """Set green state (value selected - OK)."""
         self.combo.clear()
-        self.combo.addItem(self.available_charges[0])
+        self.combo.addItem(self.available_batches[0] if len(self.available_batches) == 1 else self.current_value)
 
         # Add manual entry option
         self.combo.addItem("-- Ange manuellt --")
@@ -141,7 +141,7 @@ class ChargeSelector(QWidget):
         self.combo.setCurrentIndex(0)
         self.combo.setEditable(True)
 
-        self._set_status_icon("✓", "Värde valt", "green")
+        self._set_status_icon("✓", "Batch valt", "green")
         self._set_combo_style("#e8f5e9", "#4caf50")
         self.count_label.setVisible(False)
 
@@ -152,10 +152,10 @@ class ChargeSelector(QWidget):
         # Add current value first
         self.combo.addItem(self.current_value)
 
-        # Add other available charges if they exist
-        for charge in self.available_charges:
-            if charge != self.current_value:
-                self.combo.addItem(charge)
+        # Add other available batches if they exist
+        for batch in self.available_batches:
+            if batch != self.current_value:
+                self.combo.addItem(batch)
 
         # Add manual entry option
         self.combo.addItem("-- Ange manuellt --")
@@ -163,14 +163,14 @@ class ChargeSelector(QWidget):
         self.combo.setCurrentIndex(0)  # Select current value
         self.combo.setEditable(True)
 
-        self._set_status_icon("✓", "Värde valt", "green")
+        self._set_status_icon("✓", "Batch valt", "green")
         self._set_combo_style("#e8f5e9", "#4caf50")
         self.count_label.setVisible(False)
 
     def _set_yellow_state(self):
         """Set yellow state (multiple options - user selection required)."""
         self.combo.clear()
-        self.combo.addItems(self.available_charges)
+        self.combo.addItems(self.available_batches)
 
         # Add manual entry option
         self.combo.addItem("-- Ange manuellt --")
@@ -178,17 +178,17 @@ class ChargeSelector(QWidget):
         self.combo.setEditable(True)
 
         # Set current value if it exists and matches
-        if self.current_value and self.current_value in self.available_charges:
+        if self.current_value and self.current_value in self.available_batches:
             self.combo.setCurrentText(self.current_value)
-            self._set_status_icon("✓", "Värde valt", "green")
+            self._set_status_icon("✓", "Batch valt", "green")
             self._set_combo_style("#e8f5e9", "#4caf50")
         else:
             self.combo.setCurrentText("")
-            self._set_status_icon("⚠", f"{len(self.available_charges)} alternativ - välj ett", "orange")
+            self._set_status_icon("⚠", f"{len(self.available_batches)} alternativ - välj ett", "orange")
             self._set_combo_style("#fff3cd", "#ffc107")
 
         # Show count label for multiple options
-        self.count_label.setText(f"({len(self.available_charges)} alt.)")
+        self.count_label.setText(f"({len(self.available_batches)} alt.)")
         self.count_label.setVisible(True)
 
     def _set_status_icon(self, icon: str, tooltip: str, color: str):
@@ -221,12 +221,12 @@ class ChargeSelector(QWidget):
         # Handle manual entry selection
         if text == "-- Ange manuellt --":
             self.combo.setCurrentText("")
-            # Update style based on original number of charges
-            if len(self.available_charges) == 0:
-                self._set_status_icon("✗", "Inget charge valt", "red")
+            # Update style based on original number of batches
+            if len(self.available_batches) == 0:
+                self._set_status_icon("✗", "Inget batch valt", "red")
                 self._set_combo_style("#ffe6e6", "#dc3545")
             else:
-                self._set_status_icon("⚠", f"{len(self.available_charges)} alternativ - välj ett", "orange")
+                self._set_status_icon("⚠", f"{len(self.available_batches)} alternativ - välj ett", "orange")
                 self._set_combo_style("#fff3cd", "#ffc107")
             return
 
@@ -235,52 +235,52 @@ class ChargeSelector(QWidget):
         # Update styling based on value
         if text.strip():
             # Value exists - set green style
-            self._set_status_icon("✓", "Charge valt", "green")
+            self._set_status_icon("✓", "Batch valt", "green")
             self._set_combo_style("#e8f5e9", "#4caf50")
         else:
-            # Empty value - set style based on number of charges
-            if len(self.available_charges) == 0:
-                self._set_status_icon("✗", "Inget charge valt", "red")
+            # Empty value - set style based on number of batches
+            if len(self.available_batches) == 0:
+                self._set_status_icon("✗", "Inget batch valt", "red")
                 self._set_combo_style("#ffe6e6", "#dc3545")
-            elif len(self.available_charges) > 1:
-                self._set_status_icon("⚠", f"{len(self.available_charges)} alternativ - välj ett", "orange")
+            elif len(self.available_batches) > 1:
+                self._set_status_icon("⚠", f"{len(self.available_batches)} alternativ - välj ett", "orange")
                 self._set_combo_style("#fff3cd", "#ffc107")
-            # For 1 charge keep green since auto-match exists
+            # For 1 batch keep green since auto-match exists
 
         # Emit signal
-        self.charge_changed.emit(self.current_value)
+        self.batch_changed.emit(self.current_value)
 
         # Call callback
         if self.on_change_callback:
             self.on_change_callback(self.current_value)
 
-        logger.debug(f"Charge changed: {self.current_value}")
+        logger.debug(f"Batch changed: {self.current_value}")
 
     def get_value(self) -> str:
-        """Get current charge value."""
+        """Get current batch value."""
         return self.current_value
 
     def set_value(self, value: str):
-        """Set charge value programmatically."""
+        """Set batch value programmatically."""
         self.current_value = value
         self.combo.setCurrentText(value)
 
-    def update_available_charges(self, charges: List[str], current_value: str = ""):
+    def update_available_batches(self, batches: List[str], current_value: str = ""):
         """
-        Update available charges and refresh state.
+        Update available batches and refresh state.
 
         Args:
-            charges: New list of available charges
+            batches: New list of available batches
             current_value: New current value (optional)
         """
-        self.available_charges = charges
+        self.available_batches = batches
 
         if current_value:
             self.current_value = current_value
 
         self._apply_state()
 
-        logger.debug(f"Updated charges: {len(charges)} options")
+        logger.debug(f"Updated batches: {len(batches)} options")
 
     def is_valid(self) -> bool:
         """Check if current value is valid."""
@@ -288,9 +288,9 @@ class ChargeSelector(QWidget):
         if not self.current_value:
             return False
 
-        # If there are available charges, value must be in list
-        if self.available_charges:
-            return self.current_value in self.available_charges
+        # If there are available batches, value must be in list
+        if self.available_batches:
+            return self.current_value in self.available_batches
 
         # Manual input is valid if not empty
         return True
@@ -302,15 +302,15 @@ class ChargeSelector(QWidget):
         Returns:
             'red', 'green', or 'yellow'
         """
-        num_charges = len(self.available_charges)
+        num_batches = len(self.available_batches)
 
-        if num_charges == 0:
+        if num_batches == 0:
             return "red"
-        elif num_charges == 1:
+        elif num_batches == 1:
             return "green"
         else:
             # Multiple - check if value selected
-            if self.current_value and self.current_value in self.available_charges:
+            if self.current_value and self.current_value in self.available_batches:
                 return "green"
             else:
                 return "yellow"

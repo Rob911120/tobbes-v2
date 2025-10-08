@@ -21,6 +21,8 @@ ALLOWED_CERTIFICATE_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png"]
 
 # ==================== Default Values ====================
 
+# Database filename (actual path computed by paths.get_database_path())
+# Location: projects/sparbarhet.db (for portability)
 DEFAULT_DATABASE_NAME = "sparbarhet.db"
 DEFAULT_USER_NAME = "user"
 DEFAULT_PDF_PAGE_SIZE = "A4"
@@ -118,9 +120,9 @@ PDF_RETRY_DELAY = 1  # seconds
 # ==================== Paths ====================
 
 # Relative to project root
+# NOTE: Reports and certificates are now stored in projects/{project_id}/
+# using config.paths module (not these legacy constants)
 DATA_DIR = Path("data")
-REPORTS_DIR = Path("reports")
-CERTIFICATES_DIR = Path("certificates")
 TEMP_DIR = Path("temp")
 
 # ==================== Error Messages ====================

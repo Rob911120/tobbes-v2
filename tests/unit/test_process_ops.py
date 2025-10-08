@@ -291,5 +291,34 @@ def test_empty_inputs():
     assert results[0].is_matched is False
 
 
+def test_empty_charges_filtered_out():
+    """Test that empty charges (admin posts, articles in receiving) are filtered out."""
+    articles = [
+        {"article_number": "ART-001", "quantity": 5.0},
+        {"article_number": "ART-002", "quantity": 10.0},
+    ]
+
+    inventory = [
+        # ART-001 has empty charge (admin post)
+        {"article_number": "ART-001", "charge_number": "", "quantity": 100.0},
+        # ART-002 has both empty and valid charge
+        {"article_number": "ART-002", "charge_number": "", "quantity": 50.0},
+        {"article_number": "ART-002", "charge_number": "CHARGE-B", "quantity": 30.0},
+    ]
+
+    results = match_articles_with_charges(articles, inventory, auto_match_single=True)
+
+    # ART-001 should be unmatched (only empty charge)
+    art_001_result = next(r for r in results if r.article.article_number == "ART-001")
+    assert art_001_result.is_matched is False
+    assert len(art_001_result.available_charges) == 0
+
+    # ART-002 should match CHARGE-B (empty charge filtered out)
+    art_002_result = next(r for r in results if r.article.article_number == "ART-002")
+    assert art_002_result.is_matched is True
+    assert art_002_result.selected_charge == "CHARGE-B"
+    assert len(art_002_result.available_charges) == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

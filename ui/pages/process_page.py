@@ -278,12 +278,13 @@ class ProcessPage(QWizardPage):
             QMessageBox.information(
                 self,
                 "Klart",
-                f"Applicerade {success_count} charge-val till databasen."
+                f"Applicerade {success_count} charge-val till databasen.\n\nNavigerar till artikelkort om 2 sekunder..."
             )
 
-            # Auto-navigate to EXPORT page (matching v1 behavior)
-            logger.info("Auto-navigating to EXPORT page after successful processing")
-            self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_EXPORT)
+            # Auto-navigate to EXPORT page after 2 seconds (matching v1 behavior)
+            logger.info("Auto-navigating to EXPORT page in 2 seconds")
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(2000, lambda: self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_EXPORT))
 
         except DatabaseError as e:
             logger.error(f"Database error during apply: {e}")

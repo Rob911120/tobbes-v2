@@ -192,6 +192,63 @@ def get_notes_history(
         )
 
 
+def populate_articles_with_certificates(
+    db: DatabaseInterface,
+    articles: List[Dict[str, Any]],
+    project_id: int
+) -> List[Dict[str, Any]]:
+    """
+    Populate articles with certificates from database.
+
+    This enriches article dicts with a 'certificates' field containing
+    the list of certificates for each article.
+
+    Args:
+        db: Database instance (injected)
+        articles: List of article dicts (from get_articles_for_project)
+        project_id: Project ID
+
+    Returns:
+        Same articles list but with 'certificates' field populated
+
+    Example:
+        >>> articles = get_articles_for_project(db, project_id=1)
+        >>> articles = populate_articles_with_certificates(db, articles, project_id)
+        >>> for article in articles:
+        ...     print(f"{article['article_number']}: {len(article['certificates'])} certs")
+    """
+    logger.info(f"🔍 populate_articles_with_certificates: project_id={project_id}, {len(articles)} articles")
+
+    for article in articles:
+        article_number = article.get('article_number')
+        if article_number:
+            # Fetch certificates for this article
+            certificates = db.get_certificates_for_article(
+                project_id=project_id,
+                article_number=article_number
+            )
+            article['certificates'] = certificates
+
+            # DEBUG: Log certificate details
+            if certificates:
+                logger.info(f"  ✅ {article_number}: {len(certificates)} certifikat")
+                for cert in certificates:
+                    logger.debug(f"    - {cert.get('certificate_type', 'Unknown')}: {cert.get('stored_path', 'No path')}")
+            else:
+                logger.debug(f"  ⚠️ {article_number}: Inga certifikat")
+        else:
+            article['certificates'] = []
+            logger.warning(f"  ❌ Article utan article_number: {article}")
+
+    total_certs = sum(len(a.get('certificates', [])) for a in articles)
+    logger.info(
+        f"✅ Populated {len(articles)} articles with {total_certs} TOTAL certificates "
+        f"for project {project_id}"
+    )
+
+    return articles
+
+
 def get_articles_with_notes(
     db: DatabaseInterface,
     project_id: int

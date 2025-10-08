@@ -15,10 +15,9 @@ from .constants import (
     DEFAULT_DATABASE_NAME,
     DEFAULT_USER_NAME,
     DATA_DIR,
-    REPORTS_DIR,
-    CERTIFICATES_DIR,
     TEMP_DIR,
 )
+from .paths import get_database_path
 
 
 @dataclass
@@ -35,12 +34,12 @@ class Settings:
 
     # Database settings
     database_type: str = "sqlite"  # Future: "postgresql"
-    database_path: Path = field(default_factory=lambda: Path.cwd() / DEFAULT_DATABASE_NAME)
+    database_path: Path = field(default_factory=get_database_path)
 
     # Directory paths (created automatically if missing)
+    # NOTE: Reports and certificates are now stored per-project in projects/{project_id}/
+    # See config.paths module for project-specific paths
     data_dir: Path = field(default_factory=lambda: Path.cwd() / DATA_DIR)
-    reports_dir: Path = field(default_factory=lambda: Path.cwd() / REPORTS_DIR)
-    certificates_dir: Path = field(default_factory=lambda: Path.cwd() / CERTIFICATES_DIR)
     temp_dir: Path = field(default_factory=lambda: Path.cwd() / TEMP_DIR)
 
     # Chrome/Chromium path (auto-detected if not set)
@@ -66,8 +65,6 @@ class Settings:
         """Create required directories if they don't exist."""
         for dir_path in [
             self.data_dir,
-            self.reports_dir,
-            self.certificates_dir,
             self.temp_dir,
         ]:
             dir_path.mkdir(parents=True, exist_ok=True)
@@ -81,21 +78,20 @@ class Settings:
         - TOBBES_USER_NAME: User name for audit logging
         - TOBBES_DATABASE_PATH: Path to SQLite database
         - TOBBES_DATA_DIR: Data directory
-        - TOBBES_REPORTS_DIR: Reports output directory
-        - TOBBES_CERTIFICATES_DIR: Certificates storage directory
         - TOBBES_CHROME_PATH: Path to Chrome/Chromium executable
         - TOBBES_DEBUG: Enable debug mode (true/false)
         - TOBBES_LOG_LEVEL: Logging level (DEBUG/INFO/WARNING/ERROR)
+
+        Note: Reports and certificates are now stored per-project in projects/{project_id}/
+        See config.paths module for project-specific paths.
 
         Returns:
             Settings instance with values from environment or defaults
         """
         return cls(
             user_name=os.getenv("TOBBES_USER_NAME", DEFAULT_USER_NAME),
-            database_path=Path(os.getenv("TOBBES_DATABASE_PATH", DEFAULT_DATABASE_NAME)),
+            database_path=Path(os.getenv("TOBBES_DATABASE_PATH", str(get_database_path()))),
             data_dir=Path(os.getenv("TOBBES_DATA_DIR", DATA_DIR)),
-            reports_dir=Path(os.getenv("TOBBES_REPORTS_DIR", REPORTS_DIR)),
-            certificates_dir=Path(os.getenv("TOBBES_CERTIFICATES_DIR", CERTIFICATES_DIR)),
             temp_dir=Path(os.getenv("TOBBES_TEMP_DIR", TEMP_DIR)),
             chrome_path=os.getenv("TOBBES_CHROME_PATH"),
             debug_mode=os.getenv("TOBBES_DEBUG", "false").lower() == "true",
@@ -110,8 +106,6 @@ class Settings:
             "database_type": self.database_type,
             "database_path": str(self.database_path),
             "data_dir": str(self.data_dir),
-            "reports_dir": str(self.reports_dir),
-            "certificates_dir": str(self.certificates_dir),
             "temp_dir": str(self.temp_dir),
             "chrome_path": self.chrome_path,
             "pdf_page_size": self.pdf_page_size,

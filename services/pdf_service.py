@@ -553,6 +553,61 @@ class PDFService:
             )
 
 
+def build_table_of_contents(stamps: List[Dict[str, any]]) -> Dict[str, Dict[str, int]]:
+    """
+    Bygg innehållsförteckning från metadata-stämplar.
+
+    Grupperar stamps per doc_type och beräknar sidspann.
+
+    VIKTIGT: Lägger till +1 offset på alla sidnummer eftersom TOC kommer
+    att infogas först i PDF:en, vilket skjuter alla sidor +1.
+
+    Args:
+        stamps: Lista med metadata stamps från extract_metadata_stamps()
+                Format: [{'article_id': str, 'doc_type': str, 'pdf_page': int}, ...]
+
+    Returns:
+        Dict med TOC-data:
+        {
+            'Materialintyg': {'page_start': 5, 'page_end': 12},
+            'Svetslogg': {'page_start': 13, 'page_end': 18},
+            ...
+        }
+
+    Example:
+        >>> from services.pdf_utils import extract_metadata_stamps
+        >>> stamps = extract_metadata_stamps(Path('report.pdf'))
+        >>> toc = build_table_of_contents(stamps)
+        >>> print(toc)
+        {'Rapport': {'page_start': 2, 'page_end': 4}, 'Materialintyg': {'page_start': 5, 'page_end': 12}}
+    """
+    if not stamps:
+        logger.warning("Inga metadata-stämplar att bygga TOC från")
+        return {}
+
+    # Gruppera stamps per doc_type
+    grouped = {}
+    for stamp in stamps:
+        doc_type = stamp['doc_type']
+        pdf_page = stamp['pdf_page']
+
+        if doc_type not in grouped:
+            grouped[doc_type] = []
+        grouped[doc_type].append(pdf_page)
+
+    # Bygg TOC med sidspann (offset +1 för att kompensera TOC som sida 1)
+    toc = {}
+    for doc_type, pages in grouped.items():
+        pages.sort()  # Sortera sidnummer
+        toc[doc_type] = {
+            'page_start': pages[0] + 1,  # +1 offset för TOC
+            'page_end': pages[-1] + 1     # +1 offset för TOC
+        }
+
+    logger.info(f"Byggde TOC med {len(toc)} sektioner (offset +1): {list(toc.keys())}")
+    return toc
+
+
 def create_pdf_service(
     page_size: str = DEFAULT_PDF_PAGE_SIZE,
     enable_watermark: bool = True,

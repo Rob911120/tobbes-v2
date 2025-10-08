@@ -1,8 +1,8 @@
 """
-Export Page for Tobbes v2 Wizard.
+Articles Tab for Tobbes v2 Main Window.
 
 Article card-based verification and certificate management with SQLite persistence.
-Based on v1's verify_export_page design.
+Based on ExportPage from wizard design.
 """
 
 import logging
@@ -10,25 +10,27 @@ from typing import List, Dict, Any
 
 try:
     from PySide6.QtWidgets import (
-        QWizardPage, QVBoxLayout, QHBoxLayout, QPushButton,
+        QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
         QLabel, QGroupBox, QMessageBox, QCheckBox,
-        QScrollArea, QWidget
+        QScrollArea
     )
     from PySide6.QtCore import Qt, QThread, Signal
     PYSIDE6_AVAILABLE = True
 except ImportError:
     PYSIDE6_AVAILABLE = False
-    QWizardPage = object
+    QWidget = object
     QThread = object
     Signal = object
 
 from pathlib import Path
+from config import AppContext
 from operations import get_articles_for_project
+from operations.article_ops import update_article_notes
 from operations.report_ops import get_report_summary
-from domain.exceptions import DatabaseError, ReportGenerationError
+from domain.exceptions import DatabaseError, ReportGenerationError, ValidationError
 from services.pdf_service import create_pdf_service
 from ui.widgets import ArticleCard
-from ui.dialogs import ReportProgressDialog
+from ui.dialogs import ReportProgressDialog, CertTypesDialog
 from config.paths import get_project_reports_path
 
 logger = logging.getLogger(__name__)
@@ -105,40 +107,42 @@ class ReportGenerationWorker(QThread):
             self.error.emit(str(e))
 
 
-class ExportPage(QWizardPage):
+class ArticlesTab(QWidget):
     """
-    Export page - Article card-based verification with SQLite persistence.
+    Articles tab - Article card-based verification with SQLite persistence.
 
     Features:
     - Scrollable article cards with full editing
-    - Real-time SQLite saves (no debouncing)
-    - Dynamic verification status in subtitle
+    - Real-time SQLite saves
+    - Dynamic verification status
     - Filter to hide verified articles
     - PDF report generation
     """
 
-    def __init__(self, wizard):
-        """Initialize export page."""
-        super().__init__()
+    def __init__(self, context: AppContext, parent=None):
+        """Initialize articles tab."""
+        super().__init__(parent)
 
-        self.wizard_ref = wizard
+        self.context = context
         self.articles = []
         self.article_cards: List[ArticleCard] = []
         self.config = {}  # Will be populated with certificate types, etc.
 
         self._setup_ui()
+        self.load_articles()  # Load articles immediately
 
     def _setup_ui(self):
         """Setup UI components."""
-        self.setTitle("Verifiera och exportera")
-        # Initial subtitle - will be updated dynamically
-        self.setSubTitle("Laddar artiklar...")
-
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
 
         # Verification section (main area)
-        self.verification_group = QGroupBox("Artiklar från nivålista")
+        self.verification_group = QGroupBox("Verifiera och exportera")
         verification_layout = QVBoxLayout()
+
+        # Status label (replaces wizard subtitle)
+        self.status_label = QLabel("Laddar artiklar...")
+        self.status_label.setStyleSheet("font-weight: bold; color: #666;")
+        verification_layout.addWidget(self.status_label)
 
         # Scroll area for article cards
         self.scroll_area = QScrollArea()
@@ -155,62 +159,60 @@ class ExportPage(QWizardPage):
         self.scroll_area.setWidget(self.cards_container)
         verification_layout.addWidget(self.scroll_area)
 
-        # Controls below scroll area
-        controls_layout = QHBoxLayout()
+        self.verification_group.setLayout(verification_layout)
+        layout.addWidget(self.verification_group, stretch=1)  # Expand to fill
+
+        # Bottom action bar (matches start_page style)
+        action_bar = QHBoxLayout()
 
         # Filter checkbox
         self.hide_verified_checkbox = QCheckBox("Dölj verifierade artiklar")
         self.hide_verified_checkbox.stateChanged.connect(self._filter_articles)
-        controls_layout.addWidget(self.hide_verified_checkbox)
+        action_bar.addWidget(self.hide_verified_checkbox)
 
-        controls_layout.addStretch()
-        verification_layout.addLayout(controls_layout)
+        # Certificate types button
+        self.btn_cert_types = QPushButton("Redigera intygstyper")
+        self.btn_cert_types.clicked.connect(self._edit_project_certificate_types)
+        action_bar.addWidget(self.btn_cert_types)
 
-        self.verification_group.setLayout(verification_layout)
-        layout.addWidget(self.verification_group, stretch=1)  # Expand to fill
-
-        # Report generation section (compact, at bottom)
-        report_group = QGroupBox("Rapportgenerering")
-        report_layout = QVBoxLayout()
-
-        self.watermark_checkbox = QCheckBox("Inkludera FA-TEC watermark")
-        self.watermark_checkbox.setChecked(True)
-        report_layout.addWidget(self.watermark_checkbox)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
+        # Generate report button (watermark always enabled)
         self.btn_generate_report = QPushButton("Generera Rapport (PDF)")
         self.btn_generate_report.clicked.connect(self._generate_report)
-        self.btn_generate_report.setEnabled(True)
-        button_layout.addWidget(self.btn_generate_report)
+        action_bar.addWidget(self.btn_generate_report)
 
-        report_layout.addLayout(button_layout)
-        report_group.setLayout(report_layout)
-        layout.addWidget(report_group, stretch=0)  # Fixed size
+        action_bar.addStretch()  # Push buttons to left like start_page
+        layout.addLayout(action_bar)
 
-        self.setLayout(layout)
-
-    def initializePage(self):
-        """Initialize page when entering."""
+    def load_articles(self):
+        """Load articles from database."""
         try:
-            ctx = self.wizard_ref.context
-            project_id = ctx.require_project()
-            db = ctx.database
+            project_id = self.context.require_project()
+            db = self.context.database
+
+            logger.info(f"🔍 ArticlesTab.load_articles: Loading articles for project {project_id}")
 
             # Get articles with global data
             self.articles = get_articles_for_project(db, project_id)
+            logger.info(f"  ✅ Loaded {len(self.articles)} articles from database")
 
             # Populate with certificates so CertificateManager can display them
             from operations.article_ops import populate_articles_with_certificates
             self.articles = populate_articles_with_certificates(db, self.articles, project_id)
 
+            # DEBUG: Log certificate summary
+            total_certs = sum(len(a.get('certificates', [])) for a in self.articles)
+            articles_with_certs = sum(1 for a in self.articles if a.get('certificates'))
+            logger.info(f"  ✅ After populate: {total_certs} total certificates across {articles_with_certs} articles")
+
+            # Log sample article with certificates
+            for article in self.articles:
+                if article.get('certificates'):
+                    logger.info(f"    Example: {article['article_number']} has {len(article['certificates'])} certificates")
+                    break
+
             if not self.articles:
-                QMessageBox.warning(
-                    self,
-                    "Inga artiklar",
-                    "Inga artiklar hittades i projektet."
-                )
+                self.status_label.setText("0/0 artiklar verifierade • [INFO] Inga artiklar ännu - importera filer i 'Imports'-fliken")
+                logger.info("No articles found - user should import files")
                 return
 
             # Load config (certificate types, etc.)
@@ -224,14 +226,19 @@ class ExportPage(QWizardPage):
             # Display articles as cards
             self._display_articles()
 
-            # Update subtitle with verification status
-            self._update_subtitle()
+            # Update status
+            self._update_status()
 
         except ValueError as e:
             QMessageBox.critical(self, "Fel", str(e))
         except Exception as e:
             logger.exception("Error loading articles")
             QMessageBox.critical(self, "Fel", f"Kunde inte ladda artiklar: {e}")
+
+    def refresh_articles(self):
+        """Refresh articles from database (called after processing)."""
+        logger.info("Refreshing articles from database...")
+        self.load_articles()
 
     def _display_articles(self):
         """Display articles as cards in scroll area."""
@@ -241,9 +248,8 @@ class ExportPage(QWizardPage):
         self.article_cards.clear()
 
         # Get database and project_id from context
-        ctx = self.wizard_ref.context
-        project_id = ctx.current_project_id
-        db = ctx.database
+        project_id = self.context.current_project_id
+        db = self.context.database
 
         # Create article card for each article
         for article in self.articles:
@@ -258,6 +264,7 @@ class ExportPage(QWizardPage):
             # Connect signals for live updates
             card.verified_changed.connect(self._on_verified_changed)
             card.save_required.connect(lambda c=card: self._on_save_required(c))
+            card.notes_changed.connect(self._on_notes_changed)
 
             # Add to layout (before stretch)
             self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
@@ -265,20 +272,19 @@ class ExportPage(QWizardPage):
 
         logger.info(f"Displayed {len(self.article_cards)} article cards")
 
-    def _update_subtitle(self):
-        """Update subtitle with verification status."""
+    def _update_status(self):
+        """Update status label with verification status."""
         total = len(self.articles)
         verified = sum(1 for a in self.articles if a.get('verified', False))
 
-        if verified == total:
+        if verified == total and total > 0:
             status = "[OK] Alla artiklar verifierade"
-            self.setSubTitle(f"{verified}/{total} artiklar verifierade • {status}")
         elif verified == 0:
             status = "[VARNING] Inga verifieringar ännu"
-            self.setSubTitle(f"{verified}/{total} artiklar verifierade • {status}")
         else:
             status = "[VARNING] Fler verifieringar behövs"
-            self.setSubTitle(f"{verified}/{total} artiklar verifierade • {status}")
+
+        self.status_label.setText(f"{verified}/{total} artiklar verifierade • {status}")
 
     def _filter_articles(self, state):
         """Filter articles based on hide verified checkbox."""
@@ -293,12 +299,89 @@ class ExportPage(QWizardPage):
             else:
                 card.show()
 
+    def _edit_project_certificate_types(self):
+        """Edit project-specific certificate types."""
+        try:
+            dialog = CertTypesDialog(
+                database=self.context.database,
+                project_id=self.context.current_project_id,
+                parent=self
+            )
+            dialog.exec()
+            logger.info("Project certificate types dialog closed")
+
+            # Refresh articles to update available certificate types in cards
+            if hasattr(self, 'refresh_articles'):
+                self.refresh_articles()
+
+        except Exception as e:
+            logger.exception("Failed to open project certificate types dialog")
+            QMessageBox.critical(self, "Fel", f"Kunde inte öppna dialog: {e}")
+
     def _on_verified_changed(self, verified: bool):
         """Handle when an article's verification status changes."""
-        # Update subtitle
-        self._update_subtitle()
-
+        # Update status
+        self._update_status()
         logger.info(f"Article verification changed: {verified}")
+
+        # INSTANT hide if verified and filter is active
+        if verified and self.hide_verified_checkbox.isChecked():
+            # Find the card that was just verified and hide it
+            sender = self.sender()  # This is the card that emitted the signal
+            if sender and isinstance(sender, ArticleCard):
+                sender.hide()
+                logger.debug(f"Hid verified card for {sender.get_article_id()}")
+
+    def _on_notes_changed(self, article_number: str, notes: str):
+        """
+        Handle when article notes change.
+
+        Save notes GLOBALLY (shared across ALL projects).
+        SQLite-optimized - no debouncing needed!
+
+        Args:
+            article_number: Article number
+            notes: New notes text
+        """
+        try:
+            db = self.context.database
+
+            # Update global notes (shared across all projects)
+            update_article_notes(
+                db=db,
+                article_number=article_number,
+                notes=notes,
+                changed_by="user"
+            )
+
+            logger.info(
+                f"Saved global notes for {article_number} "
+                f"(length: {len(notes)})"
+            )
+
+        except ValidationError as e:
+            logger.error(f"Validation error saving notes: {e}")
+            QMessageBox.warning(
+                self,
+                "Valideringsfel",
+                f"Kunde inte spara anteckning:\n\n{e.message}"
+            )
+
+        except DatabaseError as e:
+            logger.error(f"Database error saving notes: {e}")
+            QMessageBox.warning(
+                self,
+                "Databasfel",
+                f"Kunde inte spara anteckning:\n\n{e.message}"
+            )
+
+        except Exception as e:
+            logger.exception("Unexpected error saving notes")
+            QMessageBox.warning(
+                self,
+                "Oväntat fel",
+                f"Ett oväntat fel uppstod vid sparning:\n\n{str(e)}"
+            )
 
     def _on_save_required(self, article_card: ArticleCard):
         """
@@ -307,27 +390,20 @@ class ExportPage(QWizardPage):
         Direct SQLite save - no debouncing needed!
         """
         try:
-            ctx = self.wizard_ref.context
-            project_id = ctx.require_project()
-            db = ctx.database
+            project_id = self.context.require_project()
+            db = self.context.database
 
             # Get updated article data
             article_data = article_card.get_article_data()
+            article_number = article_data['article_number']
 
             # Save to database immediately
             # TODO: Implement update_project_article in database interface
-            # For now, we'll update individual fields
-
-            article_number = article_data['article_number']
-
-            # Update article fields
-            # Note: This assumes database has methods for updating these fields
-            # If not, we need to add them to the database interface
 
             logger.info(f"Saved article data for {article_number} to SQLite")
 
-            # Update subtitle if verification changed
-            self._update_subtitle()
+            # Update status if verification changed
+            self._update_status()
 
         except DatabaseError as e:
             logger.error(f"Database error saving article: {e}")
@@ -348,9 +424,8 @@ class ExportPage(QWizardPage):
     def _generate_report(self):
         """Generate PDF report with TOC using progress dialog."""
         try:
-            ctx = self.wizard_ref.context
-            project_id = ctx.require_project()
-            db = ctx.database
+            project_id = self.context.require_project()
+            db = self.context.database
 
             # Get project info
             project = db.get_project(project_id)
@@ -362,7 +437,7 @@ class ExportPage(QWizardPage):
             order_number = project.get('order_number', 'unknown')
             filename = f"Spårbarhetsrapport-{order_number}-{project_id}.pdf"
 
-            # Get automatic output path: projects/{order_number}/rapports/
+            # Get automatic output path: projects/{order_number}/reports/
             reports_path = get_project_reports_path(order_number)
             output_path = reports_path / filename
 
@@ -378,8 +453,8 @@ class ExportPage(QWizardPage):
             from config.paths import get_project_certificates_path
             base_dir = get_project_certificates_path(order_number)
 
-            # Create PDF service
-            pdf_service = create_pdf_service(enable_watermark=self.watermark_checkbox.isChecked())
+            # Create PDF service (watermark always enabled)
+            pdf_service = create_pdf_service(enable_watermark=True)
 
             # Create progress dialog
             progress_dialog = ReportProgressDialog(self)
@@ -421,15 +496,7 @@ class ExportPage(QWizardPage):
         logger.error(f"Report generation failed: {error_message}")
         dialog.set_error(error_message)
 
-    def export_report(self):
-        """
-        Export report (called by wizard button).
-
-        Wrapper around _generate_report() for consistency.
-        """
-        logger.info("export_report() triggered from wizard button")
-        self._generate_report()
-
-    def isComplete(self):
-        """Page is complete when articles are loaded."""
-        return len(self.articles) > 0
+    def auto_save(self):
+        """Auto-save any pending changes (called before navigation)."""
+        # Cards auto-save to SQLite already, so nothing to do here
+        logger.debug("Auto-save called (no-op - cards save automatically)")

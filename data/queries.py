@@ -79,18 +79,19 @@ SELECT_NOTES_HISTORY = """
 
 INSERT_PROJECT_ARTICLE = """
     INSERT INTO project_articles
-    (project_id, article_number, description, quantity, level, parent_article, charge_number)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    (project_id, article_number, description, quantity, level, parent_article, charge_number, batch_number)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(project_id, article_number, level) DO UPDATE SET
         description = excluded.description,
         quantity = excluded.quantity,
         parent_article = excluded.parent_article,
-        charge_number = excluded.charge_number
+        charge_number = excluded.charge_number,
+        batch_number = excluded.batch_number
 """
 
 SELECT_PROJECT_ARTICLES = """
     SELECT id, project_id, article_number, description, quantity,
-           level, parent_article, charge_number, created_at, updated_at
+           level, parent_article, charge_number, batch_number, created_at, updated_at
     FROM project_articles
     WHERE project_id = ?
     ORDER BY level, article_number
@@ -106,6 +107,7 @@ SELECT_PROJECT_ARTICLES_WITH_GLOBAL = """
         pa.level,
         pa.parent_article,
         pa.charge_number,
+        pa.batch_number,
         pa.created_at,
         pa.updated_at,
         ga.notes AS global_notes,
@@ -122,6 +124,12 @@ UPDATE_ARTICLE_CHARGE = """
     WHERE project_id = ? AND article_number = ?
 """
 
+UPDATE_ARTICLE_CHARGE_AND_BATCH = """
+    UPDATE project_articles
+    SET charge_number = ?, batch_number = ?
+    WHERE project_id = ? AND article_number = ?
+"""
+
 UPDATE_ARTICLE_QUANTITY = """
     UPDATE project_articles
     SET quantity = ?
@@ -131,6 +139,11 @@ UPDATE_ARTICLE_QUANTITY = """
 UPDATE_ARTICLE_LEVEL = """
     UPDATE project_articles
     SET level_number = ?
+    WHERE project_id = ? AND article_number = ?
+"""
+
+DELETE_PROJECT_ARTICLE = """
+    DELETE FROM project_articles
     WHERE project_id = ? AND article_number = ?
 """
 
@@ -157,26 +170,31 @@ SELECT_AVAILABLE_CHARGES = """
     ORDER BY received_date DESC
 """
 
+DELETE_INVENTORY_ITEMS_FOR_PROJECT = """
+    DELETE FROM inventory_items
+    WHERE project_id = ?
+"""
+
 # ==================== Certificate Queries ====================
 
 INSERT_CERTIFICATE = """
     INSERT INTO certificates
-    (project_id, article_number, certificate_type, file_path,
-     original_filename, page_count, project_article_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    (project_id, article_number, certificate_id, certificate_type,
+     stored_path, stored_name, original_name, page_count, project_article_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 SELECT_CERTIFICATES_BY_ARTICLE = """
-    SELECT id, project_id, article_number, certificate_type, file_path,
-           original_filename, page_count, project_article_id, created_at
+    SELECT id, project_id, article_number, certificate_id, certificate_type,
+           stored_path, stored_name, original_name, page_count, project_article_id, created_at
     FROM certificates
     WHERE project_id = ? AND article_number = ?
     ORDER BY created_at DESC
 """
 
 SELECT_CERTIFICATES_BY_PROJECT = """
-    SELECT id, project_id, article_number, certificate_type, file_path,
-           original_filename, page_count, project_article_id, created_at
+    SELECT id, project_id, article_number, certificate_id, certificate_type,
+           stored_path, stored_name, original_name, page_count, project_article_id, created_at
     FROM certificates
     WHERE project_id = ?
     ORDER BY article_number, created_at DESC

@@ -165,13 +165,18 @@ def import_lagerlogg(
             # Validate article number
             article_number = validate_article_number(raw_item["article_number"])
 
-            # Validate charge number
-            charge_number = validate_charge_number(raw_item["charge_number"])
+            # Validate charge number (allow empty for admin posts, articles in receiving, etc.)
+            charge_number = raw_item.get("charge_number", "")
+            if charge_number:  # Only validate if not empty
+                charge_number = validate_charge_number(charge_number)
+            else:
+                logger.debug(f"Row {idx}: Empty charge number (admin post or article in receiving)")
 
-            # Validate quantity
+            # Validate quantity (allow negative for lagerlogg withdrawals)
             quantity = validate_quantity(
                 raw_item.get("quantity", 0.0),
                 allow_zero=True,
+                allow_negative=True,  # Lagerlogg can have negative quantities (withdrawals)
             )
 
             # Create clean inventory item dict
@@ -204,6 +209,9 @@ def validate_import_file(file_path: Path, expected_type: str = "nivålista") -> 
     """
     Validate that an import file exists and has correct format.
 
+    NOTE: Column validation is now done by ExcelReader with flexible matching.
+    This function only validates file existence and extension.
+
     Args:
         file_path: Path to file
         expected_type: Expected file type ("nivålista" or "lagerlogg")
@@ -217,31 +225,19 @@ def validate_import_file(file_path: Path, expected_type: str = "nivålista") -> 
     # Check file exists and has correct extension
     validate_file_path(file_path, must_exist=True, allowed_extensions=[".xlsx", ".xls"])
 
-    # Try to peek at columns to verify structure
+    # Basic validation - ExcelReader will do flexible column matching
     try:
         reader = ExcelReader(file_path)
         peek = reader.peek_columns(rows=1)
 
-        if expected_type == "nivålista":
-            # Check for typical nivålista columns
-            expected_cols = ["Artikelnummer", "Benämning", "Antal"]
-            missing = [col for col in expected_cols if col not in peek.columns]
-            if missing:
-                raise ImportValidationError(
-                    f"Nivålista saknar obligatoriska kolumner: {', '.join(missing)}",
-                    details={"file": str(file_path), "missing": missing},
-                )
+        # Just verify we can read the file - column validation happens in read_nivalista/read_lagerlogg
+        if peek.empty:
+            raise ImportValidationError(
+                "Filen verkar vara tom",
+                details={"file": str(file_path)},
+            )
 
-        elif expected_type == "lagerlogg":
-            # Check for typical lagerlogg columns
-            expected_cols = ["Artikelnummer", "Chargenummer", "Antal"]
-            missing = [col for col in expected_cols if col not in peek.columns]
-            if missing:
-                raise ImportValidationError(
-                    f"Lagerlogg saknar obligatoriska kolumner: {', '.join(missing)}",
-                    details={"file": str(file_path), "missing": missing},
-                )
-
+        logger.debug(f"File validation passed for {file_path.name} - found {len(peek.columns)} columns")
         return True
 
     except Exception as e:

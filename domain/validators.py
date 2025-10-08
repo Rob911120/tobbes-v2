@@ -16,30 +16,23 @@ def validate_order_number(order_number: str) -> str:
     """
     Validate order number format.
 
-    Expected format: TO-XXXXX (e.g., "TO-12345")
+    Accepts any non-empty format (no pattern restrictions).
 
     Args:
         order_number: Order number to validate
 
     Returns:
-        Cleaned order number (uppercased, trimmed)
+        Cleaned order number (trimmed, preserves original case)
 
     Raises:
-        ValidationError: If format is invalid
+        ValidationError: If empty
     """
     if not order_number:
         raise ValidationError("Order number cannot be empty")
 
-    cleaned = order_number.strip().upper()
+    cleaned = order_number.strip()
 
-    # Pattern: TO-XXXXX (where X is digit)
-    pattern = r"^TO-\d{4,6}$"
-    if not re.match(pattern, cleaned):
-        raise ValidationError(
-            f"Invalid order number format: '{order_number}'. Expected: TO-XXXXX",
-            details={"order_number": order_number, "pattern": pattern},
-        )
-
+    # No format restrictions - accept any non-empty order number
     return cleaned
 
 
@@ -50,7 +43,7 @@ def validate_article_number(article_number: str) -> str:
     Rules:
     - Not empty
     - Max 50 characters
-    - Alphanumeric + hyphens/underscores
+    - Alphanumeric + hyphens/underscores/slashes/dots/spaces (v1 compatibility)
 
     Args:
         article_number: Article number to validate
@@ -72,12 +65,13 @@ def validate_article_number(article_number: str) -> str:
             details={"article_number": cleaned},
         )
 
-    # Allow alphanumeric, hyphens, underscores, spaces
-    pattern = r"^[A-Za-z0-9\-_\s]+$"
+    # Allow alphanumeric, hyphens, underscores, spaces, slashes, dots
+    # This matches v1 behavior which had no pattern restriction
+    pattern = r"^[A-Za-z0-9\-_\s/.]+$"
     if not re.match(pattern, cleaned):
         raise ValidationError(
             f"Article number contains invalid characters: '{cleaned}'",
-            details={"article_number": cleaned, "allowed": "A-Z, 0-9, -, _, space"},
+            details={"article_number": cleaned, "allowed": "A-Z, 0-9, -, _, space, /, ."},
         )
 
     return cleaned
@@ -115,33 +109,48 @@ def validate_charge_number(charge_number: str) -> str:
     return cleaned
 
 
-def validate_quantity(quantity: float, allow_zero: bool = True) -> float:
+def validate_quantity(quantity: float, allow_zero: bool = True, allow_negative: bool = False) -> float:
     """
     Validate quantity value.
 
     Args:
-        quantity: Quantity to validate
+        quantity: Quantity to validate (None/NaN will be converted to 0.0)
         allow_zero: If True, allow quantity = 0
+        allow_negative: If True, allow negative quantities (for lagerlogg withdrawals)
 
     Returns:
-        Validated quantity
+        Validated quantity (guaranteed to be a valid float)
 
     Raises:
         ValidationError: If invalid
     """
-    if quantity < 0:
+    # Handle None/NaN - convert to 0.0 (v1 compatibility)
+    if quantity is None:
+        return 0.0
+
+    # Handle NaN from pandas
+    try:
+        import math
+        if math.isnan(quantity):
+            return 0.0
+    except (TypeError, ValueError):
+        pass  # Not a float or NaN, continue with validation
+
+    # Validate negative
+    if not allow_negative and quantity < 0:
         raise ValidationError(
             f"Quantity cannot be negative: {quantity}",
             details={"quantity": quantity},
         )
 
+    # Validate zero
     if not allow_zero and quantity == 0:
         raise ValidationError(
             "Quantity cannot be zero",
             details={"quantity": quantity},
         )
 
-    return quantity
+    return float(quantity)
 
 
 def validate_file_path(
@@ -260,13 +269,13 @@ def validate_project_name(project_name: str) -> str:
         ValidationError: If invalid
     """
     if not project_name:
-        raise ValidationError("Project name cannot be empty")
+        raise ValidationError("Artikelbenämning kan inte vara tom")
 
     cleaned = project_name.strip()
 
     if len(cleaned) > 200:
         raise ValidationError(
-            f"Project name too long: {len(cleaned)} characters (max 200)",
+            f"Artikelbenämning för lång: {len(cleaned)} tecken (max 200)",
             details={"project_name": cleaned},
         )
 

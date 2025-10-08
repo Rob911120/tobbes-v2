@@ -7,13 +7,13 @@ Recreates v1 UI with inline project creation and 7-column project list.
 import logging
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     from PySide6.QtWidgets import (
         QWizardPage, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
         QLabel, QTableWidget, QTableWidgetItem, QMessageBox, QLineEdit,
-        QComboBox, QGroupBox, QFrame
+        QComboBox, QGroupBox, QFrame, QHeaderView
     )
     from PySide6.QtCore import Qt
     PYSIDE6_AVAILABLE = True
@@ -23,6 +23,7 @@ except ImportError:
 
 from domain.validators import validate_order_number, validate_project_name
 from domain.exceptions import ValidationError, DatabaseError
+from ui.dialogs import CertTypesDialog
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +45,18 @@ class StartPage(QWizardPage):
 
         self.wizard_ref = wizard
         self.selected_project_id = None
-        self.sort_ascending = True  # For A-Z sorting toggle
+        self.sort_ascending = False  # Default: Show newest first (updated_at DESC)
 
         self._setup_ui()
+        self._load_projects()
+
+    def initializePage(self):
+        """
+        Called when page is shown.
+
+        Reload projects to show any updates made while in project view.
+        """
+        logger.debug("Initializing start page - reloading projects")
         self._load_projects()
 
     def _setup_ui(self):
@@ -84,21 +94,18 @@ class StartPage(QWizardPage):
         create_layout.addWidget(QLabel("Artikelbenämning:"), 0, 0)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("T.ex. 'Stålkonstruktion'")
-        self.name_edit.returnPressed.connect(self._create_project_from_form)
         create_layout.addWidget(self.name_edit, 0, 1, 1, 3)
 
         # Row 1: Ordernummer
         create_layout.addWidget(QLabel("Ordernummer:"), 1, 0)
         self.order_edit = QLineEdit()
         self.order_edit.setPlaceholderText("T.ex. 'TO-2024-001'")
-        self.order_edit.returnPressed.connect(self._create_project_from_form)
         create_layout.addWidget(self.order_edit, 1, 1, 1, 3)
 
         # Row 2: Beställningsnummer (NEW)
         create_layout.addWidget(QLabel("Beställningsnummer:"), 2, 0)
         self.purchase_order_edit = QLineEdit()
         self.purchase_order_edit.setPlaceholderText("T.ex. 'BI-2024-001' (valfritt)")
-        self.purchase_order_edit.returnPressed.connect(self._create_project_from_form)
         create_layout.addWidget(self.purchase_order_edit, 2, 1, 1, 3)
 
         # Row 3: Typ + Kund (on same row)
@@ -116,7 +123,6 @@ class StartPage(QWizardPage):
         # Row 4: Create button
         self.btn_create = QPushButton("Skapa projekt")
         self.btn_create.clicked.connect(self._create_project_from_form)
-        self.btn_create.setDefault(True)
         create_layout.addWidget(self.btn_create, 4, 0, 1, 4)
 
         create_group.setLayout(create_layout)
@@ -137,6 +143,24 @@ class StartPage(QWizardPage):
         self.projects_table.setSelectionMode(QTableWidget.SingleSelection)
         self.projects_table.doubleClicked.connect(self._open_selected_project)
         self.projects_table.itemSelectionChanged.connect(self._on_selection_changed)
+
+        # Hide vertical header (row numbers)
+        self.projects_table.verticalHeader().setVisible(False)
+
+        # Configure column resize behavior
+        header = self.projects_table.horizontalHeader()
+
+        # Fixed-width columns (resize to content)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Beställningsnr
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Ordernr
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Typ
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Verifierade
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Senast ändrad
+
+        # Stretch columns (expand with window)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Artikelbenämning (huvudkolumn)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Kund (kan vara lång)
+
         projects_layout.addWidget(self.projects_table)
 
         # Action buttons
@@ -215,13 +239,20 @@ class StartPage(QWizardPage):
                 # Format datetime if it's a string
                 if isinstance(updated, str):
                     try:
+                        # Parse timestamp (SQLite returns naive UTC string without timezone marker)
                         dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-                        updated = dt.strftime("%Y-%m-%d %H:%M")
+
+                        # If naive datetime, assume it's UTC (SQLite's CURRENT_TIMESTAMP is always UTC)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+
+                        # Convert to local timezone
+                        local_dt = dt.astimezone()
+                        updated = local_dt.strftime("%Y-%m-%d %H:%M")
                     except:
                         pass  # Keep as-is if parsing fails
                 self.projects_table.setItem(row, 6, QTableWidgetItem(str(updated)))
 
-            self.projects_table.resizeColumnsToContents()
             logger.info(f"Loaded {len(projects)} projects")
 
         except Exception as e:
@@ -243,6 +274,14 @@ class StartPage(QWizardPage):
             purchase_order_number = self.purchase_order_edit.text().strip() or None
             project_type = self.type_combo.currentText()
             customer = self.customer_edit.text().strip()
+
+            # Debug: Log form values
+            logger.debug(
+                f"Creating project with values: "
+                f"name='{project_name}', order='{order_number}', "
+                f"purchase_order='{purchase_order_number}', type='{project_type}', "
+                f"customer='{customer}'"
+            )
 
             # Validate
             validate_project_name(project_name)
@@ -280,12 +319,6 @@ class StartPage(QWizardPage):
                     self.projects_table.selectRow(row)
                     break
 
-            QMessageBox.information(
-                self,
-                "Projekt skapat",
-                f"Projektet '{project_name}' har skapats."
-            )
-
         except (ValidationError, DatabaseError) as e:
             logger.error(f"Failed to create project: {e}")
             QMessageBox.warning(self, "Fel", str(e))
@@ -303,7 +336,7 @@ class StartPage(QWizardPage):
             QMessageBox.critical(self, "Fel", f"Oväntat fel: {e}")
 
     def _open_selected_project(self):
-        """Open selected project with smart navigation (matching v1 logic)."""
+        """Open selected project (navigate to project view page in same window)."""
         selected = self.projects_table.selectedItems()
         if not selected:
             return
@@ -315,26 +348,13 @@ class StartPage(QWizardPage):
 
         # Set current project in wizard context
         self.wizard_ref.set_current_project(project_id, project_name)
-        logger.info(f"Opened project: id={project_id}, name={project_name}")
+        logger.info(f"Opening project: id={project_id}, name={project_name}")
 
-        # Smart navigation based on project status (matching v1)
-        try:
-            db = self.wizard_ref.context.database
-            stats = db.get_project_statistics(project_id)
+        # Navigate to project view page (same window!)
+        self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_PROJECT_VIEW)
 
-            if stats['total_articles'] > 0:
-                # Articles exist → Go directly to EXPORT (article cards)
-                logger.info(f"Project has {stats['total_articles']} articles - jumping to export page")
-                self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_EXPORT)
-            else:
-                # No articles → Go to IMPORT to add files
-                logger.info("Project has no articles - going to import page")
-                self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_IMPORT)
+        logger.info(f"Navigated to project view for: {project_name}")
 
-        except Exception as e:
-            logger.exception(f"Failed to check project status: {e}")
-            # Fallback: go to import
-            self.wizard_ref.setCurrentId(self.wizard_ref.PAGE_IMPORT)
 
     def _update_project(self):
         """Update selected project (placeholder for now)."""
@@ -355,15 +375,18 @@ class StartPage(QWizardPage):
         )
 
     def _edit_certificate_types(self):
-        """Edit global certificate types (placeholder)."""
-        # TODO: Implement CertificateTypesDialog
-        QMessageBox.information(
-            self,
-            "Redigera intygstyper",
-            "Dialog för att hantera certifikattyper kommer snart.\n\n"
-            "Här kan du lägga till eller ta bort globala certifikattyper "
-            "som används i alla projekt."
-        )
+        """Edit global certificate types."""
+        try:
+            dialog = CertTypesDialog(
+                database=self.wizard_ref.context.database,
+                project_id=None,  # None = global types only
+                parent=self
+            )
+            dialog.exec()
+            logger.info("Certificate types dialog closed")
+        except Exception as e:
+            logger.exception("Failed to open certificate types dialog")
+            QMessageBox.critical(self, "Fel", f"Kunde inte öppna dialog: {e}")
 
     def _toggle_sort(self):
         """Toggle sorting between A-Z and updated_at."""

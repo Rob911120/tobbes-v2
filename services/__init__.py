@@ -13,7 +13,6 @@ from .chrome_checker import (
 )
 
 from .excel_reader import ExcelReader
-from .file_service import FileService
 from .pdf_service import PDFService, create_pdf_service
 
 __all__ = [
@@ -25,8 +24,6 @@ __all__ = [
     "get_installation_instructions",
     # Excel Reader
     "ExcelReader",
-    # File Service
-    "FileService",
     # PDF Service
     "PDFService",
     "create_pdf_service",
