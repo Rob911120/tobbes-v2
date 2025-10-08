@@ -11,7 +11,8 @@ try:
     from PySide6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel,
         QPushButton, QListWidget, QLineEdit, QMessageBox,
-        QDialogButtonBox, QGroupBox
+        QDialogButtonBox, QGroupBox, QTableWidget, QTableWidgetItem,
+        QFileDialog, QHeaderView
     )
     from PySide6.QtCore import Qt
     PYSIDE6_AVAILABLE = True
@@ -72,8 +73,16 @@ class CertTypesDialog(QDialog):
             global_label = QLabel("Dessa typer är tillgängliga för alla projekt:")
             global_layout.addWidget(global_label)
 
-            self.global_list = QListWidget()
-            global_layout.addWidget(self.global_list)
+            # Table with columns: Type, Search Path
+            self.global_table = QTableWidget()
+            self.global_table.setColumnCount(2)
+            self.global_table.setHorizontalHeaderLabels(["Certifikattyp", "Sökväg"])
+            self.global_table.horizontalHeader().setStretchLastSection(True)
+            self.global_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            self.global_table.setSelectionBehavior(QTableWidget.SelectRows)
+            self.global_table.setSelectionMode(QTableWidget.SingleSelection)
+            self.global_table.verticalHeader().setVisible(False)  # Hide row numbers
+            global_layout.addWidget(self.global_table)
 
             # Global types buttons
             global_buttons = QHBoxLayout()
@@ -81,6 +90,11 @@ class CertTypesDialog(QDialog):
             self.btn_add_global = QPushButton("Lägg till")
             self.btn_add_global.clicked.connect(self._add_global_type)
             global_buttons.addWidget(self.btn_add_global)
+
+            self.btn_set_path = QPushButton("Välj mapp...")
+            self.btn_set_path.clicked.connect(self._set_search_path)
+            self.btn_set_path.setEnabled(False)
+            global_buttons.addWidget(self.btn_set_path)
 
             self.btn_remove_global = QPushButton("Ta bort")
             self.btn_remove_global.clicked.connect(self._remove_global_type)
@@ -93,8 +107,8 @@ class CertTypesDialog(QDialog):
             global_group.setLayout(global_layout)
             layout.addWidget(global_group)
 
-            # Connect selection changed for global list
-            self.global_list.itemSelectionChanged.connect(self._on_global_selection_changed)
+            # Connect selection changed for global table
+            self.global_table.itemSelectionChanged.connect(self._on_global_selection_changed)
 
         # Project-specific types section (ONLY if project_id provided)
         if self.project_id:
@@ -139,10 +153,25 @@ class CertTypesDialog(QDialog):
         """Load certificate types from database."""
         try:
             if not self.project_id:
-                # Global mode: Load only global types
-                global_types = self.database.get_certificate_types(None)
-                self.global_list.clear()
-                self.global_list.addItems(global_types)
+                # Global mode: Load global types with paths
+                types_with_paths = self.database.get_certificate_types_with_paths(None)
+
+                # Filter to only global types
+                global_types = [t for t in types_with_paths if t['is_global']]
+
+                self.global_table.setRowCount(len(global_types))
+                for row, cert_type in enumerate(global_types):
+                    # Column 0: Type name
+                    type_item = QTableWidgetItem(cert_type['type_name'])
+                    type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)  # Read-only
+                    self.global_table.setItem(row, 0, type_item)
+
+                    # Column 1: Search path
+                    path_text = cert_type['search_path'] or ""
+                    path_item = QTableWidgetItem(path_text)
+                    path_item.setFlags(path_item.flags() & ~Qt.ItemIsEditable)  # Read-only
+                    self.global_table.setItem(row, 1, path_item)
+
                 logger.info(f"Loaded {len(global_types)} global certificate types")
             else:
                 # Project mode: Load only project-specific types
@@ -160,14 +189,65 @@ class CertTypesDialog(QDialog):
             )
 
     def _on_global_selection_changed(self):
-        """Handle global list selection change."""
-        has_selection = len(self.global_list.selectedItems()) > 0
+        """Handle global table selection change."""
+        has_selection = len(self.global_table.selectedItems()) > 0
         self.btn_remove_global.setEnabled(has_selection)
+        self.btn_set_path.setEnabled(has_selection)
 
     def _on_project_selection_changed(self):
         """Handle project list selection change."""
         has_selection = len(self.project_list.selectedItems()) > 0
         self.btn_remove_project.setEnabled(has_selection)
+
+    def _set_search_path(self):
+        """Set search path for selected certificate type."""
+        current_row = self.global_table.currentRow()
+        if current_row < 0:
+            return
+
+        # Get selected type name
+        type_name = self.global_table.item(current_row, 0).text()
+
+        # Get current search path (if any)
+        current_path = self.global_table.item(current_row, 1).text()
+
+        # Open directory selection dialog
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            f"Välj mapp för {type_name}",
+            current_path if current_path else "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if directory:
+            try:
+                # Update database
+                success = self.database.update_certificate_type_search_path(
+                    type_name=type_name,
+                    search_path=directory
+                )
+
+                if success:
+                    # Reload table
+                    self._load_certificate_types()
+
+                    logger.info(f"Updated search_path for '{type_name}': {directory}")
+
+                    QMessageBox.information(
+                        self,
+                        "Uppdaterad",
+                        f"Sökväg för '{type_name}' har uppdaterats."
+                    )
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Misslyckades",
+                        f"Kunde inte uppdatera sökväg för '{type_name}'."
+                    )
+
+            except Exception as e:
+                logger.exception("Failed to update search path")
+                QMessageBox.critical(self, "Fel", f"Kunde inte uppdatera sökväg: {e}")
 
     def _add_global_type(self):
         """Add new global certificate type."""
@@ -177,8 +257,8 @@ class CertTypesDialog(QDialog):
             try:
                 # Check if already exists
                 existing_types = [
-                    self.global_list.item(i).text()
-                    for i in range(self.global_list.count())
+                    self.global_table.item(row, 0).text()
+                    for row in range(self.global_table.rowCount())
                 ]
 
                 if type_name in existing_types:
@@ -189,10 +269,10 @@ class CertTypesDialog(QDialog):
                     )
                     return
 
-                # Add to database
-                self.database.add_certificate_type(type_name, None)
+                # Add to database (no search_path initially)
+                self.database.add_certificate_type(type_name, None, None)
 
-                # Reload list
+                # Reload table
                 self._load_certificate_types()
 
                 logger.info(f"Added global certificate type: {type_name}")
@@ -251,12 +331,12 @@ class CertTypesDialog(QDialog):
 
     def _remove_global_type(self):
         """Remove selected global certificate type."""
-        selected = self.global_list.selectedItems()
+        current_row = self.global_table.currentRow()
 
-        if not selected:
+        if current_row < 0:
             return
 
-        type_name = selected[0].text()
+        type_name = self.global_table.item(current_row, 0).text()
 
         # Confirmation
         reply = QMessageBox.question(
@@ -272,7 +352,7 @@ class CertTypesDialog(QDialog):
             try:
                 self.database.delete_certificate_type(type_name, None)
 
-                # Reload list
+                # Reload table
                 self._load_certificate_types()
 
                 logger.info(f"Removed global certificate type: {type_name}")

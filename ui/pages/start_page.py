@@ -24,6 +24,7 @@ except ImportError:
 from domain.validators import validate_order_number, validate_project_name
 from domain.exceptions import ValidationError, DatabaseError
 from ui.dialogs import CertTypesDialog
+from config.paths import get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,6 @@ class StartPage(QWizardPage):
 
         self.wizard_ref = wizard
         self.selected_project_id = None
-        self.sort_ascending = False  # Default: Show newest first (updated_at DESC)
 
         self._setup_ui()
         self._load_projects()
@@ -144,6 +144,9 @@ class StartPage(QWizardPage):
         self.projects_table.doubleClicked.connect(self._open_selected_project)
         self.projects_table.itemSelectionChanged.connect(self._on_selection_changed)
 
+        # Enable sorting by clicking column headers
+        self.projects_table.setSortingEnabled(True)
+
         # Hide vertical header (row numbers)
         self.projects_table.verticalHeader().setVisible(False)
 
@@ -163,28 +166,21 @@ class StartPage(QWizardPage):
 
         projects_layout.addWidget(self.projects_table)
 
-        # Action buttons
+        # Action buttons (aligned to right)
         button_layout = QHBoxLayout()
 
-        self.btn_update = QPushButton("Uppdatera projekt...")
-        self.btn_update.clicked.connect(self._update_project)
-        self.btn_update.setEnabled(False)
-        button_layout.addWidget(self.btn_update)
+        # Stretch first to push buttons to the right
+        button_layout.addStretch()
 
         self.btn_cert_types = QPushButton("Redigera intygstyper")
         self.btn_cert_types.clicked.connect(self._edit_certificate_types)
         button_layout.addWidget(self.btn_cert_types)
-
-        self.btn_sort = QPushButton("Sortera A-Z")
-        self.btn_sort.clicked.connect(self._toggle_sort)
-        button_layout.addWidget(self.btn_sort)
 
         self.btn_open_folder = QPushButton("Öppna projektmapp")
         self.btn_open_folder.clicked.connect(self._open_project_folder)
         self.btn_open_folder.setEnabled(False)
         button_layout.addWidget(self.btn_open_folder)
 
-        button_layout.addStretch()
         projects_layout.addLayout(button_layout)
 
         projects_group.setLayout(projects_layout)
@@ -197,9 +193,8 @@ class StartPage(QWizardPage):
         try:
             db = self.wizard_ref.context.database
 
-            # Determine sort order
-            order_by = "project_name ASC" if self.sort_ascending else "updated_at DESC"
-            projects = db.list_projects(limit=100, order_by=order_by)
+            # Load projects (default sort: newest first)
+            projects = db.list_projects(limit=100, order_by="updated_at DESC")
 
             self.projects_table.setRowCount(len(projects))
 
@@ -356,24 +351,6 @@ class StartPage(QWizardPage):
         logger.info(f"Navigated to project view for: {project_name}")
 
 
-    def _update_project(self):
-        """Update selected project (placeholder for now)."""
-        selected = self.projects_table.selectedItems()
-        if not selected:
-            return
-
-        row = selected[0].row()
-        project_name = self.projects_table.item(row, 2).text()
-
-        # TODO: Implement UpdatePage navigation
-        QMessageBox.information(
-            self,
-            "Uppdatera projekt",
-            f"Uppdateringsfunktion för '{project_name}' kommer snart.\n\n"
-            "Detta öppnar UpdatePage där du kan importera nya versioner av "
-            "nivålistor och lagerloggar."
-        )
-
     def _edit_certificate_types(self):
         """Edit global certificate types."""
         try:
@@ -388,19 +365,6 @@ class StartPage(QWizardPage):
             logger.exception("Failed to open certificate types dialog")
             QMessageBox.critical(self, "Fel", f"Kunde inte öppna dialog: {e}")
 
-    def _toggle_sort(self):
-        """Toggle sorting between A-Z and updated_at."""
-        self.sort_ascending = not self.sort_ascending
-
-        # Update button text
-        if self.sort_ascending:
-            self.btn_sort.setText("Sortera A-Z")
-        else:
-            self.btn_sort.setText("Sortera efter datum")
-
-        # Reload with new sort
-        self._load_projects()
-
     def _open_project_folder(self):
         """Open project folder in file explorer."""
         selected = self.projects_table.selectedItems()
@@ -408,18 +372,11 @@ class StartPage(QWizardPage):
             return
 
         row = selected[0].row()
-        project_id = self.projects_table.item(row, 0).data(Qt.UserRole)
-        project_name = self.projects_table.item(row, 2).text()
+        order_number = self.projects_table.item(row, 1).text()  # Ordernr (column 1)
 
-        # Construct project folder path
-        # Assuming projects are stored in settings.projects_root / project_name
         try:
-            settings = self.wizard_ref.context.settings
-            project_folder = Path(settings.projects_root) / project_name
-
-            if not project_folder.exists():
-                project_folder.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Created project folder: {project_folder}")
+            # Get project folder path (projects/{order_number}/)
+            project_folder = get_project_path(order_number)
 
             # Open folder in file explorer (cross-platform)
             import platform

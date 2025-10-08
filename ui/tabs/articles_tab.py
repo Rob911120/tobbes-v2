@@ -162,13 +162,16 @@ class ArticlesTab(QWidget):
         self.verification_group.setLayout(verification_layout)
         layout.addWidget(self.verification_group, stretch=1)  # Expand to fill
 
-        # Bottom action bar (matches start_page style)
+        # Bottom action bar (checkbox left, buttons right)
         action_bar = QHBoxLayout()
 
-        # Filter checkbox
+        # Filter checkbox (left-aligned)
         self.hide_verified_checkbox = QCheckBox("Dölj verifierade artiklar")
         self.hide_verified_checkbox.stateChanged.connect(self._filter_articles)
         action_bar.addWidget(self.hide_verified_checkbox)
+
+        # Stretch to push buttons to the right
+        action_bar.addStretch()
 
         # Certificate types button
         self.btn_cert_types = QPushButton("Redigera intygstyper")
@@ -180,7 +183,6 @@ class ArticlesTab(QWidget):
         self.btn_generate_report.clicked.connect(self._generate_report)
         action_bar.addWidget(self.btn_generate_report)
 
-        action_bar.addStretch()  # Push buttons to left like start_page
         layout.addLayout(action_bar)
 
     def load_articles(self):

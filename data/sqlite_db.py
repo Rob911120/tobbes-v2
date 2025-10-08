@@ -611,15 +611,17 @@ class SQLiteDatabase(DatabaseInterface):
         self,
         type_name: str,
         project_id: Optional[int] = None,
+        search_path: Optional[str] = None,
     ) -> bool:
         """Add a new certificate type."""
         try:
             cursor = self.conn.cursor()
 
             if project_id:
+                # Project-specific types don't have search_path
                 cursor.execute(Q.INSERT_PROJECT_CERTIFICATE_TYPE, (project_id, type_name))
             else:
-                cursor.execute(Q.INSERT_GLOBAL_CERTIFICATE_TYPE, (type_name,))
+                cursor.execute(Q.INSERT_GLOBAL_CERTIFICATE_TYPE, (type_name, search_path))
 
             self.conn.commit()
             return cursor.rowcount > 0
@@ -643,6 +645,69 @@ class SQLiteDatabase(DatabaseInterface):
 
         self.conn.commit()
         return cursor.rowcount > 0
+
+    def get_certificate_types_with_paths(
+        self,
+        project_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get all certificate types with their search paths."""
+        cursor = self.conn.cursor()
+
+        # Get global types with paths
+        cursor.execute(Q.SELECT_GLOBAL_CERTIFICATE_TYPES_WITH_PATHS)
+        global_types = [
+            {
+                "type_name": row["type_name"],
+                "search_path": row["search_path"],
+                "is_global": True,
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Get project-specific types if project_id provided
+        project_types = []
+        if project_id:
+            cursor.execute(Q.SELECT_PROJECT_CERTIFICATE_TYPES_WITH_PATHS, (project_id,))
+            project_types = [
+                {
+                    "type_name": row["type_name"],
+                    "search_path": None,  # Project types don't have search paths
+                    "is_global": False,
+                }
+                for row in cursor.fetchall()
+            ]
+
+        # Combine (project-specific first)
+        return project_types + global_types
+
+    def update_certificate_type_search_path(
+        self,
+        type_name: str,
+        search_path: Optional[str],
+        project_id: Optional[int] = None,
+    ) -> bool:
+        """Update the search path for a certificate type."""
+        # Only global types have search paths
+        if project_id is not None:
+            logger.warning("Project-specific certificate types cannot have search paths")
+            return False
+
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(Q.UPDATE_CERTIFICATE_TYPE_SEARCH_PATH, (search_path, type_name))
+            self.conn.commit()
+
+            if cursor.rowcount > 0:
+                logger.info(f"Updated search_path for '{type_name}': {search_path}")
+                return True
+            else:
+                logger.warning(f"Certificate type '{type_name}' not found")
+                return False
+
+        except Exception as e:
+            logger.exception(f"Failed to update search_path: {e}")
+            self.conn.rollback()
+            return False
 
     # ==================== Statistics Operations ====================
 

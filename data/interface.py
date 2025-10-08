@@ -494,6 +494,7 @@ class DatabaseInterface(ABC):
         self,
         type_name: str,
         project_id: Optional[int] = None,
+        search_path: Optional[str] = None,
     ) -> bool:
         """
         Add a new certificate type.
@@ -502,6 +503,7 @@ class DatabaseInterface(ABC):
             type_name: Name of certificate type
             project_id: If provided, add as project-specific;
                        otherwise add as global
+            search_path: Optional default directory for auto-search/fuzzy matching
 
         Returns:
             bool: True if added, False if already exists
@@ -524,6 +526,44 @@ class DatabaseInterface(ABC):
 
         Returns:
             bool: True if deleted, False if not found
+        """
+        pass
+
+    @abstractmethod
+    def get_certificate_types_with_paths(
+        self,
+        project_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all certificate types with their search paths.
+
+        Args:
+            project_id: If provided, include project-specific types;
+                       otherwise only return global types
+
+        Returns:
+            List of dicts with keys: 'type_name', 'search_path', 'is_global'
+        """
+        pass
+
+    @abstractmethod
+    def update_certificate_type_search_path(
+        self,
+        type_name: str,
+        search_path: Optional[str],
+        project_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Update the search path for a certificate type.
+
+        Args:
+            type_name: Name of certificate type
+            search_path: New search path (None to clear)
+            project_id: If provided, update project-specific type;
+                       otherwise update global type
+
+        Returns:
+            bool: True if updated, False if type not found
         """
         pass
 

@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 try:
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-        QComboBox, QFrame, QFileDialog, QMessageBox
+        QComboBox, QFrame, QFileDialog, QMessageBox, QDialog
     )
     from PySide6.QtCore import Signal, Qt
     PYSIDE6_AVAILABLE = True
@@ -25,6 +25,7 @@ except ImportError:
 
 from services.certificate_service import create_certificate_service
 from data.interface import DatabaseInterface
+from ui.dialogs.add_certificate_dialog import AddCertificateDialog
 
 logger = logging.getLogger(__name__)
 
@@ -90,22 +91,15 @@ class CertificateManager(QFrame):
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # Header with dropdown and button
+        # Header with label and button
         header_layout = QHBoxLayout()
 
         self.header_label = QLabel("Intyg:")
         self.header_label.setStyleSheet("font-weight: bold; color: #495057;")
         header_layout.addWidget(self.header_label)
 
-        # Dropdown for certificate type
-        self.type_combo = QComboBox()
-        types = self.config.get('certificates', {}).get('types', ['Material Specification'])
-        self.type_combo.addItems(types)
-        self.type_combo.setMaximumWidth(180)
-        header_layout.addWidget(self.type_combo)
-
         # Add button
-        self.add_button = QPushButton("Välj intygsfiler...")
+        self.add_button = QPushButton("Lägg till intyg")
         self.add_button.setMaximumWidth(150)
         self.add_button.setStyleSheet("""
             QPushButton {
@@ -209,7 +203,7 @@ class CertificateManager(QFrame):
             logger.debug(f"  ⚠️ No certificates for {article_number}")
 
     def _select_files(self):
-        """Open file dialog and PROCESS certificates (copy, stamp, save)."""
+        """Open certificate dialog with auto-suggest and PROCESS certificates (copy, stamp, save)."""
         # Validate that we have database and project_id
         if not self.db or not self.project_id:
             QMessageBox.warning(
@@ -219,38 +213,53 @@ class CertificateManager(QFrame):
             )
             return
 
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Välj intygsfiler",
-            "",
-            "PDF-filer (*.pdf);;Alla filer (*.*)"
+        # Get article number and charge number from article data
+        article_number = self.article_data.get('article_number', 'UNKNOWN')
+        charge_number = self.article_data.get('charge_number')  # May be None
+
+        # Open new AddCertificateDialog with auto-suggest
+        dialog = AddCertificateDialog(
+            database=self.db,
+            article_number=article_number,
+            charge_number=charge_number,
+            project_id=self.project_id,
+            parent=self
         )
 
-        if file_paths:
-            # Process each selected file
-            for file_path in file_paths:
+        if dialog.exec() == QDialog.Accepted:
+            selected_file = dialog.get_selected_file()
+            selected_cert_type = dialog.get_selected_type()
+
+            if selected_file and selected_file.exists():
                 try:
                     # Process certificate (V1-style: copy, stamp, save)
                     result = self.cert_service.process_certificate(
-                        original_path=Path(file_path),
-                        article_num=self.article_data.get('article_number', 'UNKNOWN'),
-                        cert_type=self.type_combo.currentText(),
+                        original_path=selected_file,
+                        article_num=article_number,
+                        cert_type=selected_cert_type,
                         project_id=self.project_id,
                         db=self.db
                     )
 
                     if result['success']:
-                        # Add processed certificate
-                        cert_data = result['data']
-                        self.selected_files.append(cert_data)
-                        self._add_file_entry(cert_data)
+                        logger.info(f"Certificate processed: {result['data']['certificate_id']}")
 
-                        logger.info(f"Certificate processed: {cert_data['certificate_id']}")
+                        # Reload certificates from database to ensure UI is in sync
+                        self._reload_certificates_from_db()
+
+                        # Emit signal that certificates were added
+                        self.certificate_added.emit()
+
+                        QMessageBox.information(
+                            self,
+                            "Klart",
+                            f"Certifikat tillagt: {selected_file.name}"
+                        )
                     else:
                         QMessageBox.warning(
                             self,
                             "Fel",
-                            f"Kunde inte processa {Path(file_path).name}:\n\n{result['message']}"
+                            f"Kunde inte processa {selected_file.name}:\n\n{result['message']}"
                         )
 
                 except Exception as e:
@@ -260,12 +269,6 @@ class CertificateManager(QFrame):
                         "Oväntat fel",
                         f"Ett oväntat fel uppstod vid processning av certifikat:\n\n{str(e)}"
                     )
-
-            # Reload certificates from database to ensure UI is in sync
-            self._reload_certificates_from_db()
-
-            # Emit signal that certificates were added
-            self.certificate_added.emit()
 
     def _add_file_entry(self, file_info: Dict[str, Any]):
         """Add a file entry to the list."""

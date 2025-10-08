@@ -6,3 +6,4 @@ playwright>=1.40.0
 python-dotenv>=1.0.0
 pypdf>=3.17.0
 reportlab>=4.0.0  # For PDF stamping with metadata
+rapidfuzz>=3.6.0  # For fuzzy matching certificate filenames

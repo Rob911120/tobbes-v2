@@ -7,9 +7,36 @@ Centralized path management for projects and certificates.
 from pathlib import Path
 import logging
 import re
+import sys
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def get_app_root() -> Path:
+    """
+    Get application root directory.
+
+    Returns:
+        - Production (.exe): Directory where .exe is located
+        - Development (script): Project root (tobbes_v2/)
+
+    Example:
+        Production: C:/Users/User/Desktop/TobbesWizard.exe → C:/Users/User/Desktop/
+        Development: /Users/robs/DEV_projects/Traces/tobbes_v2/
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled .exe (Nuitka/PyInstaller)
+        app_root = Path(sys.executable).parent
+        logger.debug(f"Running as .exe, app root: {app_root}")
+    else:
+        # Running as Python script (development)
+        # __file__ = /Users/robs/.../tobbes_v2/config/paths.py
+        # parent = config/, parent.parent = tobbes_v2/
+        app_root = Path(__file__).parent.parent
+        logger.debug(f"Running as script, app root: {app_root}")
+
+    return app_root
 
 
 def sanitize_order_number(order_number: str) -> str:
@@ -40,18 +67,25 @@ def get_project_base_path() -> Path:
     """
     Get base path for all project directories.
 
-    Structure:
-        projects/
-        ├── {order_number_1}/
-        │   └── certificates/
-        ├── {order_number_2}/
-        │   └── certificates/
-        └── ...
+    Structure (relative to .exe or project root):
+        {app_root}/
+        └── projects/
+            ├── {order_number_1}/
+            │   └── certificates/
+            ├── {order_number_2}/
+            │   └── certificates/
+            └── ...
 
     Returns:
-        Path to 'projects' directory
+        Path to 'projects' directory (creates if doesn't exist)
+
+    Example:
+        Production: C:/Users/User/Desktop/projects/
+        Development: /Users/robs/.../tobbes_v2/projects/
     """
-    return Path.cwd() / "projects"
+    projects_path = get_app_root() / "projects"
+    projects_path.mkdir(parents=True, exist_ok=True)
+    return projects_path
 
 
 def get_project_path(order_number: str) -> Path:
@@ -122,16 +156,21 @@ def get_database_path() -> Path:
     Get database file path.
 
     Database is stored in projects directory for portability:
-    - Development: {cwd}/projects/sparbarhet.db
-    - Compiled: {exe_dir}/projects/sparbarhet.db
+    - Development: {project_root}/projects/sparbarhet.db
+    - Production (.exe): {exe_dir}/projects/sparbarhet.db
 
     Benefits:
     - Easy backup: copy entire projects/ folder
     - Easy cleanup: delete projects/ → all data gone
     - Portable: move projects/ between computers
+    - Self-contained: .exe + projects/ is all you need
 
     Returns:
         Path to database file
+
+    Example:
+        Production: C:/Users/User/Desktop/projects/sparbarhet.db
+        Development: /Users/robs/.../tobbes_v2/projects/sparbarhet.db
     """
     db_path = get_project_base_path() / "sparbarhet.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure projects/ exists

@@ -212,6 +212,12 @@ SELECT_GLOBAL_CERTIFICATE_TYPES = """
     ORDER BY type_name
 """
 
+SELECT_GLOBAL_CERTIFICATE_TYPES_WITH_PATHS = """
+    SELECT type_name, search_path
+    FROM certificate_types
+    ORDER BY type_name
+"""
+
 SELECT_PROJECT_CERTIFICATE_TYPES = """
     SELECT type_name
     FROM project_certificate_types
@@ -219,9 +225,22 @@ SELECT_PROJECT_CERTIFICATE_TYPES = """
     ORDER BY type_name
 """
 
+SELECT_PROJECT_CERTIFICATE_TYPES_WITH_PATHS = """
+    SELECT type_name, NULL as search_path
+    FROM project_certificate_types
+    WHERE project_id = ?
+    ORDER BY type_name
+"""
+
 INSERT_GLOBAL_CERTIFICATE_TYPE = """
-    INSERT OR IGNORE INTO certificate_types (type_name)
-    VALUES (?)
+    INSERT OR IGNORE INTO certificate_types (type_name, search_path)
+    VALUES (?, ?)
+"""
+
+UPDATE_CERTIFICATE_TYPE_SEARCH_PATH = """
+    UPDATE certificate_types
+    SET search_path = ?
+    WHERE type_name = ?
 """
 
 INSERT_PROJECT_CERTIFICATE_TYPE = """
