@@ -114,9 +114,9 @@ def main():
         icon_path = project_root / "build" / "assets" / "app.ico"
         if icon_path.exists():
             windows_opts.append(f"--windows-icon-from-ico={icon_path}")
-            print(f"✓ Using custom icon: {icon_path}")
+            print(f"Using custom icon: {icon_path}")
         else:
-            print(f"ℹ  No custom icon found, using default Python icon")
+            print("No custom icon found, using default Python icon")
 
         cmd.extend(windows_opts)
         output_name = "TobbesWizard.exe"
