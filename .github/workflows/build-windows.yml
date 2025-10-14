@@ -13,6 +13,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Extract version from constants.py
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(python -c "import sys; sys.path.insert(0, '.'); from config.constants import APP_VERSION; print(APP_VERSION)")
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Version extracted: $VERSION"
+
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -27,35 +35,12 @@ jobs:
       - name: Build EXE with Nuitka
         shell: bash
         run: |
-          python -m nuitka \
-            --standalone \
-            --output-dir=dist \
-            --enable-plugin=pyside6 \
-            --include-package=operations \
-            --include-package=domain \
-            --include-package=data \
-            --include-package=services \
-            --include-package=config \
-            --include-package=ui \
-            --include-data-dir=data/migrations=data/migrations \
-            --jobs=4 \
-            --lto=yes \
-            --python-flag=no_site \
-            --python-flag=no_warnings \
-            --follow-imports \
-            --assume-yes-for-downloads \
-            --windows-disable-console \
-            --windows-company-name=FA-TEC \
-            --windows-product-name="Tobbes v2 - Spårbarhetsguiden" \
-            --windows-file-version=2.0.0 \
-            --windows-product-version=2.0.0 \
-            --windows-file-description="Spårbarhetsguide för materialcertifikat" \
-            main.py
+          python build/nuitka_build.py
 
       - name: Create release package
         run: |
           cd dist
-          Compress-Archive -Path main.dist -DestinationPath TobbesWizard-v2.0.0-windows.zip
+          Compress-Archive -Path main.dist -DestinationPath TobbesWizard-v${{ env.APP_VERSION }}-windows.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -63,13 +48,13 @@ jobs:
           name: TobbesWizard-Windows
           path: |
             dist/main.dist/**
-            dist/TobbesWizard-v2.0.0-windows.zip
+            dist/TobbesWizard-v${{ env.APP_VERSION }}-windows.zip
           retention-days: 30
 
       - name: Create release (on tags)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/TobbesWizard-v2.0.0-windows.zip
+          files: dist/TobbesWizard-v${{ env.APP_VERSION }}-windows.zip
           draft: false
           prerelease: false

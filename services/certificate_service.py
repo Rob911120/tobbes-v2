@@ -228,7 +228,8 @@ class CertificateService:
                     stored_path=stored_path,
                     stored_name=stored_name,
                     original_name=original_name,
-                    page_count=page_count
+                    page_count=page_count,
+                    original_path=str(original_path)  # Save original path for re-processing
                 )
 
                 logger.info(f"✅ Certificate saved to database! DB ID: {cert_db_id}")
@@ -290,6 +291,103 @@ class CertificateService:
 
         except Exception as e:
             logger.exception(f"Unexpected error processing certificate: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f"Oväntat fel: {str(e)}"
+            }
+
+    def change_certificate_type(
+        self,
+        certificate_id: int,
+        new_cert_type: str,
+        project_id: int,
+        db: DatabaseInterface
+    ) -> Dict[str, Any]:
+        """
+        Change certificate type without re-uploading.
+
+        Fetches original file, re-processes with new type, deletes old.
+
+        Args:
+            certificate_id: Database ID of certificate to change
+            new_cert_type: New certificate type
+            project_id: Project ID
+            db: Database interface
+
+        Returns:
+            Dict with result:
+                {
+                    'success': bool,
+                    'data': dict,  # New certificate data (if success)
+                    'message': str
+                }
+
+        Raises:
+            ValidationError: If certificate has no original_path
+        """
+        try:
+            # 1. Get certificate from database
+            certificates = db.get_certificates_for_project(project_id)
+            cert = next((c for c in certificates if c.get('id') == certificate_id), None)
+
+            if not cert:
+                raise ValidationError(
+                    f"Certifikat med ID {certificate_id} finns inte",
+                    details={'certificate_id': certificate_id}
+                )
+
+            # 2. Validate original_path exists
+            original_path = cert.get('original_path')
+            if not original_path:
+                raise ValidationError(
+                    "Detta certifikat saknar originalsökväg och kan inte ändras. "
+                    "Bara certifikat uppladdat efter 2025-01-08 kan ändras.",
+                    details={'certificate_id': certificate_id}
+                )
+
+            original_path = Path(original_path)
+            if not original_path.exists():
+                raise ValidationError(
+                    f"Originalfilen finns inte längre: {original_path}",
+                    details={'original_path': str(original_path)}
+                )
+
+            # 3. Delete old certificate file
+            stored_path = Path(cert.get('stored_path'))
+            if stored_path.exists():
+                stored_path.unlink()
+                logger.info(f"Deleted old certificate file: {stored_path}")
+
+            # 4. Delete old certificate from database
+            db.delete_certificate(certificate_id)
+            logger.info(f"Deleted old certificate from database: {certificate_id}")
+
+            # 5. Process with new type (re-use existing method)
+            article_number = cert.get('article_number')
+            result = self.process_certificate(
+                original_path=original_path,
+                article_num=article_number,
+                cert_type=new_cert_type,
+                project_id=project_id,
+                db=db
+            )
+
+            if result['success']:
+                logger.info(f"Certificate type changed from '{cert.get('certificate_type')}' to '{new_cert_type}'")
+
+            return result
+
+        except ValidationError as e:
+            logger.error(f"Validation error: {e.message}")
+            return {
+                'success': False,
+                'error': e.message,
+                'message': f"Valideringsfel: {e.message}"
+            }
+
+        except Exception as e:
+            logger.exception(f"Unexpected error changing certificate type: {e}")
             return {
                 'success': False,
                 'error': str(e),

@@ -8,8 +8,8 @@ from pathlib import Path
 
 # ==================== Application Info ====================
 
-APP_NAME = "Tobbes v2 - Spårbarhetsguiden"
-APP_VERSION = "2.0.0"
+APP_NAME = "Tobbes - Spårbarhetsguiden"
+APP_VERSION = "1.13"
 APP_ORGANIZATION = "FA-TEC"
 APP_AUTHOR = "Tobbes"
 
@@ -62,33 +62,33 @@ LAGERLOGG_COLUMNS = {
 
 # Default global certificate types
 DEFAULT_CERTIFICATE_TYPES = [
-    "Materialintyg",
-    "Svetslogg",
-    "Kontrollrapport",
-    "Provningsprotokoll",
-    "Leverantörsintyg",
-    "Kvalitetsintyg",
-    "Andra handlingar",
+    "Material Certificate",
+    "Welding Log",
+    "Inspection Report",
+    "Test Protocol",
+    "Supplier Certificate",
+    "Quality Certificate",
+    "Other Documents",
 ]
 
 # Keywords for auto-detection (from domain.rules)
 CERTIFICATE_TYPE_KEYWORDS = {
-    "materialintyg": "Materialintyg",
-    "material": "Materialintyg",
-    "3.1": "Materialintyg",
-    "3.2": "Materialintyg",
-    "certifikat": "Certifikat",
-    "certificate": "Certifikat",
-    "svets": "Svetslogg",
-    "weld": "Svetslogg",
-    "kontroll": "Kontrollrapport",
-    "inspection": "Kontrollrapport",
-    "provning": "Provningsprotokoll",
-    "test": "Provningsprotokoll",
-    "leverantör": "Leverantörsintyg",
-    "supplier": "Leverantörsintyg",
-    "kvalitet": "Kvalitetsintyg",
-    "quality": "Kvalitetsintyg",
+    "materialintyg": "Material Certificate",
+    "material": "Material Certificate",
+    "3.1": "Material Certificate",
+    "3.2": "Material Certificate",
+    "certifikat": "Certificate",
+    "certificate": "Certificate",
+    "svets": "Welding Log",
+    "weld": "Welding Log",
+    "kontroll": "Inspection Report",
+    "inspection": "Inspection Report",
+    "provning": "Test Protocol",
+    "test": "Test Protocol",
+    "leverantör": "Supplier Certificate",
+    "supplier": "Supplier Certificate",
+    "kvalitet": "Quality Certificate",
+    "quality": "Quality Certificate",
 }
 
 # ==================== UI Constants ====================

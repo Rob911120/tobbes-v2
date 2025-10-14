@@ -90,6 +90,7 @@ def import_nivalista(
                 "quantity": quantity,
                 "level": raw_article.get("level", "").strip(),
                 "parent_article": raw_article.get("parent_article"),
+                "sort_order": idx,  # Preserve original row order from Excel
             }
 
             articles.append(article)
@@ -104,8 +105,102 @@ def import_nivalista(
             details={"file": str(file_path)},
         )
 
-    logger.info(f"Successfully imported {len(articles)} articles from nivålista")
+    # Convert depth-based levels (1, 2, 3) to path-based levels (1, 1.1, 1.1.1)
+    # Excel uses simple integers to represent depth, we need full paths
+    articles = _convert_depth_to_path(articles)
+
+    # Build hierarchy from level column
+    # This calculates parent_article and level_depth from the level field
+    from operations.hierarchy_ops import build_hierarchy
+
+    try:
+        articles = build_hierarchy(articles)
+        logger.info(
+            f"Successfully imported {len(articles)} articles with hierarchy from nivålista"
+        )
+    except ImportValidationError:
+        # Re-raise hierarchy validation errors as-is
+        raise
+    except Exception as e:
+        raise ImportValidationError(
+            f"Kunde inte bygga hierarki: {e}",
+            details={"file": str(file_path), "error": str(e)}
+        )
+
     return articles
+
+
+def _convert_depth_to_path(articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Convert depth-based levels (0, 1, 2, 3...) to path-based levels (1, 1.1, 1.1.1...).
+
+    Excel stores levels as simple integers representing depth (0-indexed):
+    - 0 = top level (converts to "1")
+    - 1 = child of most recent level 0 (converts to "1.1")
+    - 2 = child of most recent level 1 (converts to "1.1.1")
+    - etc.
+
+    We need to convert this to full paths by adding 1 to all depths:
+    - 0 → "1" (top-level)
+    - 1 → "1.1" (first child)
+    - 2 → "1.1.1" (grandchild)
+
+    Args:
+        articles: Articles with depth-based levels
+
+    Returns:
+        Articles with path-based levels
+
+    Example:
+        Input:  [{"level": "0"}, {"level": "1"}, {"level": "1"}, {"level": "2"}]
+        Output: [{"level": "1"}, {"level": "1.1"}, {"level": "1.2"}, {"level": "1.2.1"}]
+    """
+    result = []
+    path_stack = []  # Stack of counters for each level
+
+    for article in articles:
+        level_str = article.get("level", "").strip()
+
+        # Check if already in path format (contains dot)
+        if "." in level_str:
+            # Already path notation, keep as-is
+            result.append(article)
+            continue
+
+        # Parse depth as integer
+        try:
+            depth = int(level_str)
+        except (ValueError, TypeError):
+            # Not a valid integer, keep as-is
+            result.append(article)
+            continue
+
+        # Convert 0-indexed depth to 1-indexed depth
+        # Excel depth 0 = path depth 1 (top-level)
+        # Excel depth 1 = path depth 2 (child)
+        # Excel depth 2 = path depth 3 (grandchild)
+        path_depth = depth + 1
+
+        # Adjust stack to current depth
+        if path_depth < len(path_stack):
+            # Going back to shallower depth: remove deeper levels
+            path_stack = path_stack[:path_depth]
+        elif path_depth > len(path_stack):
+            # Going deeper: add new levels with counter 0
+            while len(path_stack) < path_depth:
+                path_stack.append(0)
+        # else: Same depth as before, just increment the counter
+
+        # Increment counter at current depth
+        path_stack[path_depth-1] += 1
+
+        # Build path string
+        path_parts = [str(count) for count in path_stack]
+        article["level"] = ".".join(path_parts)
+
+        result.append(article)
+
+    return result
 
 
 def import_lagerlogg(

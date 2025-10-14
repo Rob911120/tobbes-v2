@@ -287,6 +287,61 @@ def get_articles_needing_manual_selection(match_results: List[MatchResult]) -> L
     return [r for r in match_results if r.needs_manual_selection]
 
 
+def _get_most_recent_value(
+    article_number: str,
+    inventory_items: List[InventoryItem],
+    field: str = 'charge_number',
+) -> Optional[str]:
+    """
+    Get the most recent charge or batch for an article from inventory.
+
+    Selects the value from the inventory item with the most recent received_date.
+    This ensures we always use the latest charge/batch, even if multiple exist.
+
+    Args:
+        article_number: Article to find value for
+        inventory_items: Available inventory items
+        field: Field to extract ('charge_number' or 'batch_id')
+
+    Returns:
+        Most recent charge/batch, or None if no matching items found
+
+    Example:
+        >>> inventory = [
+        ...     InventoryItem(article_number="ART-001", charge_number="OLD-123", received_date="2024-01-01"),
+        ...     InventoryItem(article_number="ART-001", charge_number="NEW-456", received_date="2024-06-01"),
+        ... ]
+        >>> _get_most_recent_value("ART-001", inventory, 'charge_number')
+        'NEW-456'  # Returns the most recent one
+    """
+    matching_items = [
+        item for item in inventory_items
+        if item.article_number == article_number
+    ]
+
+    if not matching_items:
+        return None
+
+    # Sort by received_date (most recent first), then by id as fallback
+    # Items without received_date go to end
+    sorted_items = sorted(
+        matching_items,
+        key=lambda x: (
+            x.received_date if x.received_date else "",
+            x.id if x.id else 0
+        ),
+        reverse=True
+    )
+
+    # Get the value from the most recent item
+    most_recent = sorted_items[0]
+    value = getattr(most_recent, field, None)
+
+    # Return the value even if it's an empty string
+    # Empty string is a valid value (charge removal/admin post)
+    return value
+
+
 def compare_import_with_existing(
     existing_articles: List[Dict[str, Any]],
     new_articles: List[Dict[str, Any]],
@@ -299,8 +354,9 @@ def compare_import_with_existing(
     Used for both first-time import (all "new") and re-import (diff).
 
     **Smart Re-import Logic:**
-    - Lagerlogg: Update charge/batch ONLY on non-verified articles
+    - Lagerlogg: Update charge/batch with MOST RECENT value from inventory
     - Nivålista: Detect structure changes (levels, removed articles)
+    - Detects changes even when new value is empty (charge removal)
 
     Args:
         existing_articles: Current articles in project (from DB)
@@ -376,23 +432,15 @@ def compare_import_with_existing(
 
         if not existing:
             # NEW article - not in existing project
-            # Match with inventory to get charge/batch
-            article_model = Article(
-                project_id=0,
-                article_number=article_num,
-                description=new_article.get('description', ''),
-                quantity=new_article.get('quantity', 0.0),
-                level=new_article.get('level', ''),
-            )
+            # Get the most recent charge/batch from inventory
+            new_charge = _get_most_recent_value(article_num, inventory_models, 'charge_number')
+            new_batch = _get_most_recent_value(article_num, inventory_models, 'batch_id')
 
-            available_charges = get_available_charges(article_model, inventory_models)
-            available_batches = get_available_batches(article_model, inventory_models)
-
-            # Auto-select if only 1 option
-            if len(available_charges) == 1:
-                new_article['charge_number'] = available_charges[0]
-            if len(available_batches) == 1:
-                new_article['batch_number'] = available_batches[0]
+            # Add charge/batch to new article
+            if new_charge is not None:
+                new_article['charge_number'] = new_charge
+            if new_batch is not None:
+                new_article['batch_number'] = new_batch
 
             new_articles_list.append(new_article)
             continue
@@ -414,39 +462,64 @@ def compare_import_with_existing(
             }
 
         # Compare charge/batch from new inventory
-        # Get new charge/batch for this article
-        article_model = Article(
-            project_id=0,
-            article_number=article_num,
-            description=new_article.get('description', ''),
-            quantity=new_article.get('quantity', 0.0),
-            level=new_article.get('level', ''),
+        # Get MOST RECENT charge/batch for this article
+        # This handles cases where inventory has multiple charges (old + new)
+        available_charges = get_available_charges(
+            Article(
+                project_id=0,
+                article_number=article_num,
+                description=new_article.get('description', ''),
+                quantity=new_article.get('quantity', 0.0),
+                level=new_article.get('level', ''),
+            ),
+            inventory_models
+        )
+        available_batches = get_available_batches(
+            Article(
+                project_id=0,
+                article_number=article_num,
+                description=new_article.get('description', ''),
+                quantity=new_article.get('quantity', 0.0),
+                level=new_article.get('level', ''),
+            ),
+            inventory_models
         )
 
-        available_charges = get_available_charges(article_model, inventory_models)
-        available_batches = get_available_batches(article_model, inventory_models)
+        # Get the most recent charge/batch from inventory
+        # This ensures we use the latest value even if multiple exist
+        new_charge = _get_most_recent_value(article_num, inventory_models, 'charge_number')
+        new_batch = _get_most_recent_value(article_num, inventory_models, 'batch_id')
 
-        # Auto-select if only 1 option
-        new_charge = available_charges[0] if len(available_charges) == 1 else None
-        new_batch = available_batches[0] if len(available_batches) == 1 else None
-
-        # FIX: Add charge/batch to article dict so they're saved correctly
-        if new_charge:
+        # Add charge/batch to article dict so they're saved correctly
+        # IMPORTANT: Allow empty strings (charge removal is valid)
+        if new_charge is not None:
             new_article['charge_number'] = new_charge
-        if new_batch:
+        if new_batch is not None:
             new_article['batch_number'] = new_batch
 
-        if new_charge and new_charge != existing.get('charge_number'):
+        # Detect charge changes (INCLUDING changes to empty string)
+        # FIX: Changed from "if new_charge and..." to "if new_charge is not None and..."
+        # This ensures we detect charge removal (change from X to "")
+        if new_charge is not None and new_charge != existing.get('charge_number', ''):
             changes['charge'] = {
                 'old': existing.get('charge_number', ''),
                 'new': new_charge
             }
+            logger.debug(
+                f"Detected charge change for {article_num}: "
+                f"'{existing.get('charge_number', '')}' → '{new_charge}'"
+            )
 
-        if new_batch and new_batch != existing.get('batch_number'):
+        # Detect batch changes (INCLUDING changes to empty string)
+        if new_batch is not None and new_batch != existing.get('batch_number', ''):
             changes['batch'] = {
                 'old': existing.get('batch_number', ''),
                 'new': new_batch
             }
+            logger.debug(
+                f"Detected batch change for {article_num}: "
+                f"'{existing.get('batch_number', '')}' → '{new_batch}'"
+            )
 
         # Determine if article can be updated
         is_verified = existing.get('verified', False)

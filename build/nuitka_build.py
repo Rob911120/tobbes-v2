@@ -23,6 +23,10 @@ import subprocess
 from pathlib import Path
 import argparse
 
+# Import version from constants
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config.constants import APP_VERSION, APP_NAME
+
 
 def main():
     """Main build function."""
@@ -101,9 +105,9 @@ def main():
             "--windows-disable-console",
             "--windows-icon-from-ico=build/assets/app.ico",
             "--windows-company-name=FA-TEC",
-            "--windows-product-name=Tobbes v2 - Spårbarhetsguiden",
-            "--windows-file-version=2.0.0",
-            "--windows-product-version=2.0.0",
+            f"--windows-product-name={APP_NAME}",
+            f"--windows-file-version={APP_VERSION}",
+            f"--windows-product-version={APP_VERSION}",
             "--windows-file-description=Spårbarhetsguide för materialcertifikat",
         ])
         output_name = "TobbesWizard.exe"

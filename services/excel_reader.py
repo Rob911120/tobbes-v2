@@ -212,13 +212,14 @@ class ExcelReader:
         article_col_found = self._find_column(columns, ARTICLE_NUMBER_VARIANTS) or article_col
         description_col_found = self._find_column(columns, DESCRIPTION_VARIANTS) or description_col
         quantity_col_found = self._find_column(columns, QUANTITY_VARIANTS) or quantity_col
-        level_col_found = self._find_column(columns, LEVEL_VARIANTS)  # Optional
+        level_col_found = self._find_column(columns, LEVEL_VARIANTS)  # REQUIRED (not optional)
 
-        # Validate required columns exist
+        # Validate required columns exist (including Nivå)
         required_mapping = {
             'Artikelnummer': article_col_found,
             'Benämning': description_col_found,
             'Antal/Kvantitet': quantity_col_found,
+            'Nivå': level_col_found,  # NOW REQUIRED
         }
 
         missing_cols = []

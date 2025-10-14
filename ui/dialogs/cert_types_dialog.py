@@ -96,6 +96,16 @@ class CertTypesDialog(QDialog):
             self.btn_set_path.setEnabled(False)
             global_buttons.addWidget(self.btn_set_path)
 
+            self.btn_move_global_up = QPushButton("Flytta upp ↑")
+            self.btn_move_global_up.clicked.connect(self._move_global_type_up)
+            self.btn_move_global_up.setEnabled(False)
+            global_buttons.addWidget(self.btn_move_global_up)
+
+            self.btn_move_global_down = QPushButton("Flytta ner ↓")
+            self.btn_move_global_down.clicked.connect(self._move_global_type_down)
+            self.btn_move_global_down.setEnabled(False)
+            global_buttons.addWidget(self.btn_move_global_down)
+
             self.btn_remove_global = QPushButton("Ta bort")
             self.btn_remove_global.clicked.connect(self._remove_global_type)
             self.btn_remove_global.setEnabled(False)
@@ -127,6 +137,16 @@ class CertTypesDialog(QDialog):
             self.btn_add_project = QPushButton("Lägg till")
             self.btn_add_project.clicked.connect(self._add_project_type)
             project_buttons.addWidget(self.btn_add_project)
+
+            self.btn_move_project_up = QPushButton("Flytta upp ↑")
+            self.btn_move_project_up.clicked.connect(self._move_project_type_up)
+            self.btn_move_project_up.setEnabled(False)
+            project_buttons.addWidget(self.btn_move_project_up)
+
+            self.btn_move_project_down = QPushButton("Flytta ner ↓")
+            self.btn_move_project_down.clicked.connect(self._move_project_type_down)
+            self.btn_move_project_down.setEnabled(False)
+            project_buttons.addWidget(self.btn_move_project_down)
 
             self.btn_remove_project = QPushButton("Ta bort")
             self.btn_remove_project.clicked.connect(self._remove_project_type)
@@ -174,10 +194,14 @@ class CertTypesDialog(QDialog):
 
                 logger.info(f"Loaded {len(global_types)} global certificate types")
             else:
-                # Project mode: Load only project-specific types
-                project_types = self.database.get_certificate_types(self.project_id)
+                # Project mode: Load ONLY project-specific types (not global)
+                types_with_paths = self.database.get_certificate_types_with_paths(self.project_id)
+
+                # Filter to only project-specific types (exclude global)
+                project_types = [t for t in types_with_paths if not t['is_global']]
+
                 self.project_list.clear()
-                self.project_list.addItems(project_types)
+                self.project_list.addItems([t['type_name'] for t in project_types])
                 logger.info(f"Loaded {len(project_types)} project certificate types")
 
         except Exception as e:
@@ -191,13 +215,23 @@ class CertTypesDialog(QDialog):
     def _on_global_selection_changed(self):
         """Handle global table selection change."""
         has_selection = len(self.global_table.selectedItems()) > 0
+        current_row = self.global_table.currentRow()
+        row_count = self.global_table.rowCount()
+
         self.btn_remove_global.setEnabled(has_selection)
         self.btn_set_path.setEnabled(has_selection)
+        self.btn_move_global_up.setEnabled(has_selection and current_row > 0)
+        self.btn_move_global_down.setEnabled(has_selection and current_row < row_count - 1)
 
     def _on_project_selection_changed(self):
         """Handle project list selection change."""
         has_selection = len(self.project_list.selectedItems()) > 0
+        current_row = self.project_list.currentRow()
+        row_count = self.project_list.count()
+
         self.btn_remove_project.setEnabled(has_selection)
+        self.btn_move_project_up.setEnabled(has_selection and current_row > 0)
+        self.btn_move_project_down.setEnabled(has_selection and current_row < row_count - 1)
 
     def _set_search_path(self):
         """Set search path for selected certificate type."""
@@ -293,17 +327,13 @@ class CertTypesDialog(QDialog):
 
         if ok and type_name:
             try:
-                # Check if already exists (global or project)
-                all_types = [
-                    self.global_list.item(i).text()
-                    for i in range(self.global_list.count())
-                ]
-                all_types += [
+                # Check if already exists in project-specific types
+                existing_types = [
                     self.project_list.item(i).text()
                     for i in range(self.project_list.count())
                 ]
 
-                if type_name in all_types:
+                if type_name in existing_types:
                     QMessageBox.warning(
                         self,
                         "Finns redan",
@@ -425,6 +455,154 @@ class CertTypesDialog(QDialog):
 
         return type_name.strip(), ok
 
+    def _move_global_type_up(self):
+        """Move selected global certificate type up in the list."""
+        current_row = self.global_table.currentRow()
+        if current_row <= 0:
+            return
+
+        # Get type names for current and previous row
+        type_name_current = self.global_table.item(current_row, 0).text()
+        type_name_previous = self.global_table.item(current_row - 1, 0).text()
+
+        try:
+            # Swap sort order in database
+            success = self.database.swap_certificate_type_order(
+                type_name_1=type_name_previous,
+                type_name_2=type_name_current,
+                project_id=None
+            )
+
+            if success:
+                # Reload table
+                self._load_certificate_types()
+
+                # Re-select the moved item (now at previous row)
+                self.global_table.selectRow(current_row - 1)
+
+                logger.info(f"Moved '{type_name_current}' up")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Misslyckades",
+                    f"Kunde inte flytta '{type_name_current}' uppåt."
+                )
+
+        except Exception as e:
+            logger.exception("Failed to move global type up")
+            QMessageBox.critical(self, "Fel", f"Kunde inte flytta typ: {e}")
+
+    def _move_global_type_down(self):
+        """Move selected global certificate type down in the list."""
+        current_row = self.global_table.currentRow()
+        if current_row < 0 or current_row >= self.global_table.rowCount() - 1:
+            return
+
+        # Get type names for current and next row
+        type_name_current = self.global_table.item(current_row, 0).text()
+        type_name_next = self.global_table.item(current_row + 1, 0).text()
+
+        try:
+            # Swap sort order in database
+            success = self.database.swap_certificate_type_order(
+                type_name_1=type_name_current,
+                type_name_2=type_name_next,
+                project_id=None
+            )
+
+            if success:
+                # Reload table
+                self._load_certificate_types()
+
+                # Re-select the moved item (now at next row)
+                self.global_table.selectRow(current_row + 1)
+
+                logger.info(f"Moved '{type_name_current}' down")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Misslyckades",
+                    f"Kunde inte flytta '{type_name_current}' nedåt."
+                )
+
+        except Exception as e:
+            logger.exception("Failed to move global type down")
+            QMessageBox.critical(self, "Fel", f"Kunde inte flytta typ: {e}")
+
+    def _move_project_type_up(self):
+        """Move selected project-specific certificate type up in the list."""
+        current_row = self.project_list.currentRow()
+        if current_row <= 0:
+            return
+
+        # Get type names for current and previous row
+        type_name_current = self.project_list.item(current_row).text()
+        type_name_previous = self.project_list.item(current_row - 1).text()
+
+        try:
+            # Swap sort order in database
+            success = self.database.swap_certificate_type_order(
+                type_name_1=type_name_previous,
+                type_name_2=type_name_current,
+                project_id=self.project_id
+            )
+
+            if success:
+                # Reload list
+                self._load_certificate_types()
+
+                # Re-select the moved item (now at previous row)
+                self.project_list.setCurrentRow(current_row - 1)
+
+                logger.info(f"Moved '{type_name_current}' up (project_id={self.project_id})")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Misslyckades",
+                    f"Kunde inte flytta '{type_name_current}' uppåt."
+                )
+
+        except Exception as e:
+            logger.exception("Failed to move project type up")
+            QMessageBox.critical(self, "Fel", f"Kunde inte flytta typ: {e}")
+
+    def _move_project_type_down(self):
+        """Move selected project-specific certificate type down in the list."""
+        current_row = self.project_list.currentRow()
+        if current_row < 0 or current_row >= self.project_list.count() - 1:
+            return
+
+        # Get type names for current and next row
+        type_name_current = self.project_list.item(current_row).text()
+        type_name_next = self.project_list.item(current_row + 1).text()
+
+        try:
+            # Swap sort order in database
+            success = self.database.swap_certificate_type_order(
+                type_name_1=type_name_current,
+                type_name_2=type_name_next,
+                project_id=self.project_id
+            )
+
+            if success:
+                # Reload list
+                self._load_certificate_types()
+
+                # Re-select the moved item (now at next row)
+                self.project_list.setCurrentRow(current_row + 1)
+
+                logger.info(f"Moved '{type_name_current}' down (project_id={self.project_id})")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Misslyckades",
+                    f"Kunde inte flytta '{type_name_current}' nedåt."
+                )
+
+        except Exception as e:
+            logger.exception("Failed to move project type down")
+            QMessageBox.critical(self, "Fel", f"Kunde inte flytta typ: {e}")
+
     def get_all_types(self) -> List[str]:
         """
         Get all certificate types (global + project).
@@ -432,11 +610,16 @@ class CertTypesDialog(QDialog):
         Returns:
             List of certificate type names
         """
-        types = [
-            self.global_list.item(i).text()
-            for i in range(self.global_list.count())
-        ]
+        types = []
 
+        # Add global types if in global mode
+        if not self.project_id and hasattr(self, 'global_table'):
+            types = [
+                self.global_table.item(row, 0).text()
+                for row in range(self.global_table.rowCount())
+            ]
+
+        # Add project-specific types if in project mode
         if self.project_id and hasattr(self, 'project_list'):
             types += [
                 self.project_list.item(i).text()

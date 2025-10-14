@@ -147,7 +147,7 @@ def _build_articles_table(
         article_num = article.get("article_number", "")
         desc = article.get("global_description", article.get("description", ""))
         qty = article.get("quantity", 0.0)
-        level = article.get("level_number", article.get("level", ""))
+        level = article.get("level", "")  # Hierarchy level (1, 1.1, 1.1.1, etc.)
         batch = article.get("batch_number", "")
         charge = article.get("charge_number", "")
 
@@ -304,7 +304,7 @@ def create_toc_cover_html(
         HTML string med cover + TOC
 
     Example:
-        >>> toc_data = {'Rapport': {'page_start': 2, 'page_end': 4}}
+        >>> toc_data = {'MATERIAL SPECIFICATION': {'page_start': 2, 'page_end': 4}}
         >>> html = create_toc_cover_html(project, toc_data, article_count=25)
     """
     # Handle both Project object and dict
@@ -391,6 +391,7 @@ def create_toc_cover_html(
 
 def generate_report_with_toc(
     pdf_service: PDFService,
+    database,  # DatabaseInterface (avoiding circular import)
     project: Union[Project, Dict],
     articles: List[Dict],
     certificates: List[Union[Certificate, Dict]],
@@ -403,8 +404,8 @@ def generate_report_with_toc(
 
     Pipeline:
     1. Generera materialspecifikation HTML → PDF
-    2. Stämpla med metadata (doc_type="Rapport")
-    3. Skapa section dividers för varje certifikattyp
+    2. Stämpla med metadata (doc_type="MATERIAL SPECIFICATION")
+    3. Skapa section dividers för varje certifikattyp (sorterade enligt sort_order)
     4. Stämpla dividers med metadata
     5. Stämpla alla certifikat med metadata
     6. Slå samman allt till temp PDF
@@ -416,6 +417,7 @@ def generate_report_with_toc(
 
     Args:
         pdf_service: PDFService instance (injected)
+        database: DatabaseInterface instance (injected) - used for fetching sort_order
         project: Project information
         articles: List of article dicts
         certificates: List of certificates
@@ -431,7 +433,7 @@ def generate_report_with_toc(
 
     Example:
         >>> service = create_pdf_service()
-        >>> pdf = generate_report_with_toc(service, project, articles, certs, output, base)
+        >>> pdf = generate_report_with_toc(service, db, project, articles, certs, output, base)
     """
     from services.pdf_utils import (
         stamp_pdf_with_metadata,
@@ -467,7 +469,7 @@ def generate_report_with_toc(
         pdf_service.html_to_pdf(main_html, main_pdf_path)
 
         # Stamp main report
-        stamp_pdf_with_metadata(main_pdf_path, "Rapport", "Rapport", markers)
+        stamp_pdf_with_metadata(main_pdf_path, "MATERIAL SPECIFICATION", "MATERIAL SPECIFICATION", markers)
         logger.info("Main report generated and stamped")
 
         if progress_callback:
@@ -482,6 +484,24 @@ def generate_report_with_toc(
                 cert_groups[cert_type] = []
             cert_groups[cert_type].append(cert)
 
+        # Fetch certificate types with sort_order from database
+        project_id = project.get('id') if isinstance(project, dict) else getattr(project, 'id', None)
+        cert_types_with_order = database.get_certificate_types_with_sort_order(project_id)
+
+        # Create sort_order mapping (type_name -> sort_order)
+        sort_order_map = {
+            ct['type_name']: ct['sort_order']
+            for ct in cert_types_with_order
+        }
+
+        # Sort cert_groups by sort_order (types not in database get high sort_order value)
+        sorted_cert_groups = sorted(
+            cert_groups.items(),
+            key=lambda item: sort_order_map.get(item[0], 999999)
+        )
+
+        logger.info(f"Certificate types will be processed in sort_order: {[ct for ct, _ in sorted_cert_groups]}")
+
         if progress_callback:
             progress_callback(30)
 
@@ -489,7 +509,7 @@ def generate_report_with_toc(
         logger.info("Step 3: Creating dividers and stamping certificates...")
         all_pdfs = [main_pdf_path]
 
-        for cert_type, certs in cert_groups.items():
+        for cert_type, certs in sorted_cert_groups:
             # Create divider
             divider_html = f"""
             <!DOCTYPE html>

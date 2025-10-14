@@ -257,7 +257,6 @@ class StartPage(QWizardPage):
     def _on_selection_changed(self):
         """Handle table selection change."""
         has_selection = len(self.projects_table.selectedItems()) > 0
-        self.btn_update.setEnabled(has_selection)
         self.btn_open_folder.setEnabled(has_selection)
 
     def _create_project_from_form(self):

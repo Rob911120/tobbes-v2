@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+# Pre-commit hook for Tobbes v2
+# Automatically increments version and synchronizes to other files
+#
+# Version increment: 1.12 → 1.13 → 1.14 (automatic)
+#
+# Installation:
+#   cp .githooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+
+echo "🔄 Auto-incrementing version..."
+
+# Auto-increment version in config/constants.py
+python3 - << 'EOF'
+import re
+from pathlib import Path
+
+# Read constants.py
+constants_path = Path("config/constants.py")
+content = constants_path.read_text(encoding='utf-8')
+
+# Extract current version
+match = re.search(r'APP_VERSION\s*=\s*["\']([0-9.]+)["\']', content)
+if not match:
+    print("❌ Could not find APP_VERSION")
+    exit(1)
+
+current_version = match.group(1)
+
+# Increment version (1.12 → 1.13)
+version_float = float(current_version)
+new_version_float = round(version_float + 0.01, 2)
+new_version = str(new_version_float)
+
+# Replace in content
+new_content = re.sub(
+    r'(APP_VERSION\s*=\s*["\'])[0-9.]+(["\'])',
+    f'\\g<1>{new_version}\\2',
+    content
+)
+
+# Write back
+constants_path.write_text(new_content, encoding='utf-8')
+
+print(f"✓ Version incremented: {current_version} → {new_version}")
+EOF
+
+# Check if increment was successful
+if [ $? -ne 0 ]; then
+    echo "❌ Version increment failed"
+    exit 1
+fi
+
+# Run sync script
+python3 build/sync_version.py
+
+# Check if sync was successful
+if [ $? -ne 0 ]; then
+    echo "❌ Version sync failed"
+    exit 1
+fi
+
+# Add modified files to the commit
+git add config/constants.py
+git add build/assets/version.txt
+
+echo "✅ Version auto-incremented and synchronized"
+exit 0

@@ -22,28 +22,28 @@ from operations.certificate_ops import (
 
 
 def test_guess_certificate_type_materialintyg():
-    """Test guessing Materialintyg type."""
-    assert guess_certificate_type("materialintyg_2024.pdf") == "Materialintyg"
-    assert guess_certificate_type("material_certificate.pdf") == "Materialintyg"
-    assert guess_certificate_type("cert_3.1.pdf") == "Materialintyg"
+    """Test guessing Material Certificate type."""
+    assert guess_certificate_type("materialintyg_2024.pdf") == "Material Certificate"
+    assert guess_certificate_type("material_certificate.pdf") == "Material Certificate"
+    assert guess_certificate_type("cert_3.1.pdf") == "Material Certificate"
 
 
 def test_guess_certificate_type_svetslogg():
-    """Test guessing Svetslogg type."""
-    assert guess_certificate_type("svets_protokoll.pdf") == "Svetslogg"
-    assert guess_certificate_type("weld_report.pdf") == "Svetslogg"
+    """Test guessing Welding Log type."""
+    assert guess_certificate_type("svets_protokoll.pdf") == "Welding Log"
+    assert guess_certificate_type("weld_report.pdf") == "Welding Log"
 
 
 def test_guess_certificate_type_kontrollrapport():
-    """Test guessing Kontrollrapport type."""
-    assert guess_certificate_type("kontroll_2024.pdf") == "Kontrollrapport"
-    assert guess_certificate_type("inspection_report.pdf") == "Kontrollrapport"
+    """Test guessing Inspection Report type."""
+    assert guess_certificate_type("kontroll_2024.pdf") == "Inspection Report"
+    assert guess_certificate_type("inspection_report.pdf") == "Inspection Report"
 
 
 def test_guess_certificate_type_unknown():
-    """Test unknown type defaults to 'Andra handlingar'."""
-    assert guess_certificate_type("unknown_document.pdf") == "Andra handlingar"
-    assert guess_certificate_type("random.pdf") == "Andra handlingar"
+    """Test unknown type defaults to 'Other Documents'."""
+    assert guess_certificate_type("unknown_document.pdf") == "Other Documents"
+    assert guess_certificate_type("random.pdf") == "Other Documents"
 
 
 def test_validate_certificate_file_valid(tmp_path):
@@ -88,7 +88,7 @@ def test_create_certificate_dict_auto_type(tmp_path):
 
     assert cert_dict["project_id"] == 1
     assert cert_dict["article_number"] == "ART-001"
-    assert cert_dict["certificate_type"] == "Materialintyg"  # Auto-detected
+    assert cert_dict["certificate_type"] == "Material Certificate"  # Auto-detected
     assert cert_dict["original_filename"] == "materialintyg_2024.pdf"
     assert cert_dict["file_path"] == str(test_file)
 
@@ -102,11 +102,11 @@ def test_create_certificate_dict_explicit_type(tmp_path):
         project_id=1,
         article_number="ART-001",
         file_path=test_file,
-        certificate_type="Svetslogg",  # Explicit
+        certificate_type="Welding Log",  # Explicit
         original_name="original_name.pdf",
     )
 
-    assert cert_dict["certificate_type"] == "Svetslogg"
+    assert cert_dict["certificate_type"] == "Welding Log"
     assert cert_dict["original_filename"] == "original_name.pdf"
 
 
@@ -117,21 +117,21 @@ def test_get_certificates_summary():
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert1.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert1.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert2.pdf",
-            certificate_type="Svetslogg",
+            certificate_type="Welding Log",
             original_filename="cert2.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-002",
             file_path="/path/cert3.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert3.pdf",
         ),
     ]
@@ -141,8 +141,8 @@ def test_get_certificates_summary():
     assert summary["total_count"] == 3
     assert summary["unique_types"] == 2
     assert summary["unique_articles"] == 2
-    assert summary["by_type"]["Materialintyg"] == 2
-    assert summary["by_type"]["Svetslogg"] == 1
+    assert summary["by_type"]["Material Certificate"] == 2
+    assert summary["by_type"]["Welding Log"] == 1
     assert summary["by_article"]["ART-001"] == 2
     assert summary["by_article"]["ART-002"] == 1
 
@@ -154,21 +154,21 @@ def test_get_certificates_for_article():
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert1.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert1.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-002",
             file_path="/path/cert2.pdf",
-            certificate_type="Svetslogg",
+            certificate_type="Welding Log",
             original_filename="cert2.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert3.pdf",
-            certificate_type="Kontrollrapport",
+            certificate_type="Inspection Report",
             original_filename="cert3.pdf",
         ),
     ]
@@ -186,29 +186,29 @@ def test_get_certificates_by_type():
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert1.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert1.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-002",
             file_path="/path/cert2.pdf",
-            certificate_type="Svetslogg",
+            certificate_type="Welding Log",
             original_filename="cert2.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-003",
             file_path="/path/cert3.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert3.pdf",
         ),
     ]
 
-    result = get_certificates_by_type(certificates, "Materialintyg")
+    result = get_certificates_by_type(certificates, "Material Certificate")
 
     assert len(result) == 2
-    assert all(cert.certificate_type == "Materialintyg" for cert in result)
+    assert all(cert.certificate_type == "Material Certificate" for cert in result)
 
 
 def test_get_articles_with_certificates():
@@ -218,21 +218,21 @@ def test_get_articles_with_certificates():
             project_id=1,
             article_number="ART-003",
             file_path="/path/cert1.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert1.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert2.pdf",
-            certificate_type="Svetslogg",
+            certificate_type="Welding Log",
             original_filename="cert2.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert3.pdf",
-            certificate_type="Kontrollrapport",
+            certificate_type="Inspection Report",
             original_filename="cert3.pdf",
         ),
     ]
@@ -251,14 +251,14 @@ def test_get_articles_without_certificates():
             project_id=1,
             article_number="ART-001",
             file_path="/path/cert1.pdf",
-            certificate_type="Materialintyg",
+            certificate_type="Material Certificate",
             original_filename="cert1.pdf",
         ),
         Certificate(
             project_id=1,
             article_number="ART-003",
             file_path="/path/cert2.pdf",
-            certificate_type="Svetslogg",
+            certificate_type="Welding Log",
             original_filename="cert2.pdf",
         ),
     ]

@@ -155,7 +155,7 @@ class UpdatePage(QWizardPage):
                 new_data = import_ops.import_lagerlogg(self.selected_file)
 
             # Get current articles
-            current_articles = ctx.database.get_articles_for_project(ctx.current_project_id)
+            current_articles = ctx.database.get_project_articles(ctx.current_project_id)
 
             # Compare and detect updates
             self.detected_updates = update_ops.compare_articles_for_update(
@@ -238,6 +238,7 @@ class UpdatePage(QWizardPage):
         """Get display name for field."""
         field_names = {
             'charge_number': 'Chargenummer',
+            'batch_id': 'Batchnummer',
             'quantity': 'Antal',
             'description': 'Beskrivning',
             'level_number': 'Nivå',
@@ -300,18 +301,18 @@ class UpdatePage(QWizardPage):
                 ctx = self.wizard_ref.context
 
                 # Apply updates
-                result = update_ops.apply_article_updates(
-                    database=ctx.database,
+                result = update_ops.apply_updates(
+                    db=ctx.database,
                     project_id=ctx.current_project_id,
-                    updates=selected_updates
+                    selected_updates=selected_updates
                 )
 
-                logger.info(f"Applied {result['updated']} updates, removed {result['certificates_removed']} certificates")
+                logger.info(f"Applied {result['applied_count']} updates, removed {result['certificates_removed']} certificates")
 
                 QMessageBox.information(
                     self,
                     "Uppdateringar tillämpade",
-                    f"Tillämpade {result['updated']} uppdateringar.\n"
+                    f"Tillämpade {result['applied_count']} uppdateringar.\n"
                     f"Tog bort {result['certificates_removed']} certifikat."
                 )
 

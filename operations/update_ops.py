@@ -76,18 +76,39 @@ def compare_articles_for_update(
         # Check different fields based on update type
         if update_type == 'lagerlogg':
             # Compare charge_number (primary field in lagerlogg)
-            new_charge = new_item.get("charge_number", "")
-            current_charge = current.get("charge_number") or ""
+            new_charge = new_item.get("charge_number", "").strip()
+            current_charge = (current.get("charge_number") or "").strip()
 
-            if new_charge and new_charge != current_charge:
-                updates.append(ArticleUpdate(
-                    article_number=article_num,
-                    field_name="charge_number",
-                    old_value=current_charge,
-                    new_value=new_charge,
-                    update_type=update_type,
-                    affects_certificates=True,  # Charge change requires cert removal
-                ))
+            # Skip only if BOTH are empty (matches v1 logic)
+            # This allows: charge X → charge Y, charge X → empty, empty → charge Y
+            if not (not new_charge and not current_charge):
+                if new_charge != current_charge:
+                    updates.append(ArticleUpdate(
+                        article_number=article_num,
+                        field_name="charge_number",
+                        old_value=current_charge if current_charge else "(tomt)",
+                        new_value=new_charge if new_charge else "(tomt)",
+                        update_type=update_type,
+                        affects_certificates=True,  # Charge change requires cert removal
+                    ))
+
+            # Compare batch_id (missing in original v2!)
+            # Note: new_item uses "batch_id" (from import_lagerlogg/inventory_items)
+            #       current uses "batch_number" (from project_articles)
+            new_batch = new_item.get("batch_id", "").strip()
+            current_batch = (current.get("batch_number") or "").strip()
+
+            # Skip only if BOTH are empty
+            if not (not new_batch and not current_batch):
+                if new_batch != current_batch:
+                    updates.append(ArticleUpdate(
+                        article_number=article_num,
+                        field_name="batch_id",
+                        old_value=current_batch if current_batch else "(tomt)",
+                        new_value=new_batch if new_batch else "(tomt)",
+                        update_type=update_type,
+                        affects_certificates=True,  # Batch change also requires cert removal
+                    ))
 
         elif update_type == 'nivalista':
             # Compare quantity
@@ -104,7 +125,7 @@ def compare_articles_for_update(
                     affects_certificates=False,
                 ))
 
-            # Compare level
+            # Compare level (hierarchy position)
             new_level = new_item.get("level", "")
             current_level = current.get("level", "")
 
@@ -114,6 +135,34 @@ def compare_articles_for_update(
                     field_name="level",
                     old_value=current_level,
                     new_value=new_level,
+                    update_type=update_type,
+                    affects_certificates=False,  # Hierarchy changes do NOT affect certificates
+                ))
+
+            # Compare parent_article (hierarchy relationship)
+            new_parent = new_item.get("parent_article")
+            current_parent = current.get("parent_article")
+
+            if new_parent != current_parent:
+                updates.append(ArticleUpdate(
+                    article_number=article_num,
+                    field_name="parent_article",
+                    old_value=current_parent if current_parent else "(top-level)",
+                    new_value=new_parent if new_parent else "(top-level)",
+                    update_type=update_type,
+                    affects_certificates=False,  # Hierarchy changes do NOT affect certificates
+                ))
+
+            # Compare sort_order (display order)
+            new_sort = new_item.get("sort_order", 0)
+            current_sort = current.get("sort_order", 0)
+
+            if new_sort != current_sort:
+                updates.append(ArticleUpdate(
+                    article_number=article_num,
+                    field_name="sort_order",
+                    old_value=current_sort,
+                    new_value=new_sort,
                     update_type=update_type,
                     affects_certificates=False,
                 ))
@@ -203,6 +252,33 @@ def apply_updates(
                                 f"{update.article_number} (charge changed)"
                             )
 
+                elif update.field_name == "batch_id":
+                    # Update batch_id in project_articles table
+                    batch_value = update.new_value if update.new_value != "(tomt)" else ""
+                    success = db.update_article_batch(
+                        project_id=project_id,
+                        article_number=update.article_number,
+                        batch_id=batch_value,
+                    )
+
+                    if success:
+                        applied_count += 1
+
+                        # Delete certificates if batch changed
+                        if update.affects_certificates:
+                            certs = db.get_certificates_for_article(
+                                project_id=project_id,
+                                article_number=update.article_number
+                            )
+                            for cert in certs:
+                                db.delete_certificate(cert["id"])
+                                certificates_removed += 1
+
+                            logger.info(
+                                f"Removed {len(certs)} certificates for "
+                                f"{update.article_number} (batch changed)"
+                            )
+
                 elif update.field_name == "quantity":
                     # Update quantity in project_articles
                     success = db.update_article_quantity(
@@ -219,6 +295,27 @@ def apply_updates(
                         project_id=project_id,
                         article_number=update.article_number,
                         level=update.new_value,
+                    )
+                    if success:
+                        applied_count += 1
+
+                elif update.field_name == "parent_article":
+                    # Update parent_article in project_articles
+                    parent_value = update.new_value if update.new_value != "(top-level)" else None
+                    success = db.update_article_parent(
+                        project_id=project_id,
+                        article_number=update.article_number,
+                        parent_article=parent_value,
+                    )
+                    if success:
+                        applied_count += 1
+
+                elif update.field_name == "sort_order":
+                    # Update sort_order in project_articles
+                    success = db.update_article_sort_order(
+                        project_id=project_id,
+                        article_number=update.article_number,
+                        sort_order=update.new_value,
                     )
                     if success:
                         applied_count += 1

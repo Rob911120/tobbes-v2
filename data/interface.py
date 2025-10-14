@@ -205,6 +205,7 @@ class DatabaseInterface(ABC):
                 - level (int, e.g., 1, 1.1, 1.1.1)
                 - parent_article (Optional[str])
                 - charge_number (Optional[str])
+                - sort_order (int) - preserves original row order from Excel
 
         Returns:
             bool: True if successful
@@ -308,6 +309,88 @@ class DatabaseInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    def update_article_batch(
+        self,
+        project_id: int,
+        article_number: str,
+        batch_id: Optional[str],
+    ) -> bool:
+        """
+        Update batch ID for a project article.
+
+        Args:
+            project_id: The project ID
+            article_number: Article number
+            batch_id: New batch ID (None or empty to clear)
+
+        Returns:
+            bool: True if successful
+        """
+        pass
+
+    @abstractmethod
+    def update_article_parent(
+        self,
+        project_id: int,
+        article_number: str,
+        parent_article: Optional[str],
+    ) -> bool:
+        """
+        Update parent article for a project article (hierarchy).
+
+        Args:
+            project_id: The project ID
+            article_number: Article number
+            parent_article: Parent article number (None for top-level)
+
+        Returns:
+            bool: True if successful
+        """
+        pass
+
+    @abstractmethod
+    def update_article_sort_order(
+        self,
+        project_id: int,
+        article_number: str,
+        sort_order: int,
+    ) -> bool:
+        """
+        Update sort order for a project article (display order).
+
+        Args:
+            project_id: The project ID
+            article_number: Article number
+            sort_order: Sort order (integer, lower = earlier in list)
+
+        Returns:
+            bool: True if successful
+        """
+        pass
+
+    @abstractmethod
+    def delete_project_article(
+        self,
+        project_id: int,
+        article_number: str,
+    ) -> bool:
+        """
+        Delete article from project.
+
+        NOTE: This only removes the project_article record.
+        Global article data is preserved (other projects might use it).
+        Certificates should be deleted separately before calling this.
+
+        Args:
+            project_id: The project ID
+            article_number: Article number
+
+        Returns:
+            bool: True if deleted, False if not found
+        """
+        pass
+
     # ==================== Inventory Operations ====================
 
     @abstractmethod
@@ -400,6 +483,7 @@ class DatabaseInterface(ABC):
         original_name: str,
         page_count: int = 0,
         project_article_id: Optional[int] = None,
+        original_path: Optional[str] = None,
     ) -> int:
         """
         Save a certificate for an article with full storage metadata.
@@ -414,6 +498,7 @@ class DatabaseInterface(ABC):
             original_name: Original filename before processing
             page_count: Number of pages in PDF
             project_article_id: Optional reference to specific project_articles.id
+            original_path: Original file path (for re-processing with different type)
 
         Returns:
             int: Certificate database ID
@@ -564,6 +649,47 @@ class DatabaseInterface(ABC):
 
         Returns:
             bool: True if updated, False if type not found
+        """
+        pass
+
+    @abstractmethod
+    def swap_certificate_type_order(
+        self,
+        type_name_1: str,
+        type_name_2: str,
+        project_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Swap the sort_order of two certificate types.
+
+        Used for moving types up/down in the list.
+
+        Args:
+            type_name_1: First certificate type name
+            type_name_2: Second certificate type name
+            project_id: If provided, swap project-specific types;
+                       otherwise swap global types
+
+        Returns:
+            bool: True if swapped successfully
+        """
+        pass
+
+    @abstractmethod
+    def get_certificate_types_with_sort_order(
+        self,
+        project_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get certificate types with their sort_order for ordering.
+
+        Args:
+            project_id: If provided, include project-specific types;
+                       otherwise only return global types
+
+        Returns:
+            List of dicts with keys: 'type_name', 'sort_order', 'is_global'
+            Sorted by sort_order ascending
         """
         pass
 

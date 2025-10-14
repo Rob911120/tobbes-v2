@@ -154,8 +154,13 @@ class SQLiteDatabase(DatabaseInterface):
                     (project_name, order_number, customer, created_by, description,
                      purchase_order_number, project_type),
                 )
+                new_project_id = cursor.lastrowid
                 self.conn.commit()
-                return cursor.lastrowid
+
+                # Initialize certificate types for new project
+                self._initialize_project_certificate_types(new_project_id)
+
+                return new_project_id
 
         except sqlite3.IntegrityError as e:
             raise DatabaseError(
@@ -273,6 +278,7 @@ class SQLiteDatabase(DatabaseInterface):
                         article.get("parent_article"),
                         article.get("charge_number"),
                         article.get("batch_number"),
+                        article.get("sort_order", 0),  # Preserve import order from Excel
                     ),
                 )
 
@@ -339,6 +345,49 @@ class SQLiteDatabase(DatabaseInterface):
         cursor = self.conn.cursor()
         cursor.execute(
             Q.UPDATE_ARTICLE_LEVEL, (level, project_id, article_number)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def update_article_batch(
+        self,
+        project_id: int,
+        article_number: str,
+        batch_id: Optional[str],
+    ) -> bool:
+        """Update batch ID for a project article."""
+        cursor = self.conn.cursor()
+        batch_value = batch_id if batch_id else None
+        cursor.execute(
+            Q.UPDATE_ARTICLE_BATCH, (batch_value, project_id, article_number)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def update_article_parent(
+        self,
+        project_id: int,
+        article_number: str,
+        parent_article: Optional[str],
+    ) -> bool:
+        """Update parent article for a project article (hierarchy)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            Q.UPDATE_ARTICLE_PARENT, (parent_article, project_id, article_number)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def update_article_sort_order(
+        self,
+        project_id: int,
+        article_number: str,
+        sort_order: int,
+    ) -> bool:
+        """Update sort order for a project article (display order)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            Q.UPDATE_ARTICLE_SORT_ORDER, (sort_order, project_id, article_number)
         )
         self.conn.commit()
         return cursor.rowcount > 0
@@ -498,6 +547,7 @@ class SQLiteDatabase(DatabaseInterface):
         original_name: str,
         page_count: int = 0,
         project_article_id: Optional[int] = None,
+        original_path: Optional[str] = None,
     ) -> int:
         """Save a certificate for an article with full storage metadata."""
         logger.debug(f"💾 SQLiteDatabase.save_certificate() called:")
@@ -520,6 +570,7 @@ class SQLiteDatabase(DatabaseInterface):
                     original_name,
                     page_count,
                     project_article_id,
+                    original_path,
                 ),
             )
 
@@ -591,21 +642,22 @@ class SQLiteDatabase(DatabaseInterface):
         self,
         project_id: Optional[int] = None,
     ) -> List[str]:
-        """Get all certificate types (global + project-specific)."""
+        """
+        Get certificate types.
+
+        If project_id is provided: Returns project-specific types only (sorted by sort_order).
+        If project_id is None: Returns global types (for template management).
+        """
         cursor = self.conn.cursor()
 
-        # Get global types
-        cursor.execute(Q.SELECT_GLOBAL_CERTIFICATE_TYPES)
-        global_types = [row["type_name"] for row in cursor.fetchall()]
-
-        # Get project-specific types if project_id provided
-        project_types = []
         if project_id:
+            # Project mode: Return only project-specific types
             cursor.execute(Q.SELECT_PROJECT_CERTIFICATE_TYPES, (project_id,))
-            project_types = [row["type_name"] for row in cursor.fetchall()]
-
-        # Combine and sort (project-specific first)
-        return sorted(set(project_types + global_types))
+            return [row["type_name"] for row in cursor.fetchall()]
+        else:
+            # Global mode: Return global template types
+            cursor.execute(Q.SELECT_GLOBAL_CERTIFICATE_TYPES)
+            return [row["type_name"] for row in cursor.fetchall()]
 
     def add_certificate_type(
         self,
@@ -613,22 +665,67 @@ class SQLiteDatabase(DatabaseInterface):
         project_id: Optional[int] = None,
         search_path: Optional[str] = None,
     ) -> bool:
-        """Add a new certificate type."""
+        """Add a new certificate type with auto-assigned sort_order."""
         try:
             cursor = self.conn.cursor()
 
             if project_id:
-                # Project-specific types don't have search_path
-                cursor.execute(Q.INSERT_PROJECT_CERTIFICATE_TYPE, (project_id, type_name))
+                # Project-specific type: Get max sort_order + 10
+                cursor.execute(Q.SELECT_MAX_PROJECT_SORT_ORDER, (project_id,))
+                max_sort_order = cursor.fetchone()["max_sort_order"]
+                new_sort_order = max_sort_order + 10
+
+                cursor.execute(Q.INSERT_PROJECT_CERTIFICATE_TYPE, (project_id, type_name, new_sort_order))
             else:
-                cursor.execute(Q.INSERT_GLOBAL_CERTIFICATE_TYPE, (type_name, search_path))
+                # Global type: Get max sort_order + 10
+                cursor.execute(Q.SELECT_MAX_GLOBAL_SORT_ORDER)
+                max_sort_order = cursor.fetchone()["max_sort_order"]
+                new_sort_order = max_sort_order + 10
+
+                cursor.execute(Q.INSERT_GLOBAL_CERTIFICATE_TYPE, (type_name, search_path, new_sort_order))
 
             self.conn.commit()
+            logger.info(f"Added certificate type '{type_name}' with sort_order={new_sort_order}")
             return cursor.rowcount > 0
 
         except Exception as e:
             logger.warning(f"Failed to add certificate type (may already exist): {e}")
             return False
+
+    def _initialize_project_certificate_types(self, project_id: int) -> None:
+        """
+        Initialize project certificate types by copying all global types.
+
+        Called automatically when a new project is created.
+        Each project gets its own copy of standard types which can be reordered independently.
+
+        Args:
+            project_id: ID of newly created project
+        """
+        try:
+            cursor = self.conn.cursor()
+
+            # Get all global certificate types
+            cursor.execute(Q.SELECT_GLOBAL_CERTIFICATE_TYPES_WITH_SORT_ORDER)
+            global_types = cursor.fetchall()
+
+            # Copy each global type to project_certificate_types
+            for row in global_types:
+                type_name = row["type_name"]
+                sort_order = row["sort_order"]
+
+                cursor.execute(
+                    Q.INSERT_PROJECT_CERTIFICATE_TYPE,
+                    (project_id, type_name, sort_order)
+                )
+
+            self.conn.commit()
+            logger.info(f"Initialized {len(global_types)} certificate types for project {project_id}")
+
+        except Exception as e:
+            logger.exception(f"Failed to initialize project certificate types: {e}")
+            self.conn.rollback()
+            # Don't raise - project creation should succeed even if this fails
 
     def delete_certificate_type(
         self,
@@ -708,6 +805,115 @@ class SQLiteDatabase(DatabaseInterface):
             logger.exception(f"Failed to update search_path: {e}")
             self.conn.rollback()
             return False
+
+    def swap_certificate_type_order(
+        self,
+        type_name_1: str,
+        type_name_2: str,
+        project_id: Optional[int] = None,
+    ) -> bool:
+        """Swap the sort_order of two certificate types."""
+        try:
+            cursor = self.conn.cursor()
+
+            if project_id:
+                # Project-specific types
+                # Get sort_orders
+                cursor.execute(
+                    "SELECT sort_order FROM project_certificate_types WHERE project_id = ? AND type_name = ?",
+                    (project_id, type_name_1)
+                )
+                row1 = cursor.fetchone()
+
+                cursor.execute(
+                    "SELECT sort_order FROM project_certificate_types WHERE project_id = ? AND type_name = ?",
+                    (project_id, type_name_2)
+                )
+                row2 = cursor.fetchone()
+
+                if not row1 or not row2:
+                    logger.warning(
+                        f"Could not find both certificate types for swap: "
+                        f"project_id={project_id}, type1='{type_name_1}' (found={row1 is not None}), "
+                        f"type2='{type_name_2}' (found={row2 is not None})"
+                    )
+                    return False
+
+                sort_order_1 = row1["sort_order"]
+                sort_order_2 = row2["sort_order"]
+
+                # Swap
+                cursor.execute(Q.UPDATE_PROJECT_CERTIFICATE_TYPE_SORT_ORDER, (sort_order_2, project_id, type_name_1))
+                cursor.execute(Q.UPDATE_PROJECT_CERTIFICATE_TYPE_SORT_ORDER, (sort_order_1, project_id, type_name_2))
+            else:
+                # Global types
+                # Get sort_orders
+                cursor.execute(
+                    "SELECT sort_order FROM certificate_types WHERE type_name = ?",
+                    (type_name_1,)
+                )
+                row1 = cursor.fetchone()
+
+                cursor.execute(
+                    "SELECT sort_order FROM certificate_types WHERE type_name = ?",
+                    (type_name_2,)
+                )
+                row2 = cursor.fetchone()
+
+                if not row1 or not row2:
+                    logger.warning(f"Could not find both certificate types for swap")
+                    return False
+
+                sort_order_1 = row1["sort_order"]
+                sort_order_2 = row2["sort_order"]
+
+                # Swap
+                cursor.execute(Q.UPDATE_GLOBAL_CERTIFICATE_TYPE_SORT_ORDER, (sort_order_2, type_name_1))
+                cursor.execute(Q.UPDATE_GLOBAL_CERTIFICATE_TYPE_SORT_ORDER, (sort_order_1, type_name_2))
+
+            self.conn.commit()
+            logger.info(f"Swapped sort_order for '{type_name_1}' and '{type_name_2}'")
+            return True
+
+        except Exception as e:
+            logger.exception(f"Failed to swap certificate type order: {e}")
+            self.conn.rollback()
+            return False
+
+    def get_certificate_types_with_sort_order(
+        self,
+        project_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get certificate types with their sort_order for ordering.
+
+        If project_id is provided: Returns project-specific types only.
+        If project_id is None: Returns global template types.
+        """
+        cursor = self.conn.cursor()
+
+        if project_id:
+            # Project mode: Return only project-specific types
+            cursor.execute(Q.SELECT_PROJECT_CERTIFICATE_TYPES_WITH_SORT_ORDER, (project_id,))
+            return [
+                {
+                    "type_name": row["type_name"],
+                    "sort_order": row["sort_order"],
+                    "is_global": False,
+                }
+                for row in cursor.fetchall()
+            ]
+        else:
+            # Global mode: Return global template types
+            cursor.execute(Q.SELECT_GLOBAL_CERTIFICATE_TYPES_WITH_SORT_ORDER)
+            return [
+                {
+                    "type_name": row["type_name"],
+                    "sort_order": row["sort_order"],
+                    "is_global": True,
+                }
+                for row in cursor.fetchall()
+            ]
 
     # ==================== Statistics Operations ====================
 

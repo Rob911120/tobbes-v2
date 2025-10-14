@@ -11,22 +11,22 @@ from .models import Article, InventoryItem, Certificate
 
 # Certificate type keywords for auto-detection
 CERTIFICATE_TYPE_KEYWORDS = {
-    "materialintyg": "Materialintyg",
-    "material": "Materialintyg",
-    "3.1": "Materialintyg",
-    "3.2": "Materialintyg",
-    "certifikat": "Certifikat",
-    "certificate": "Certifikat",
-    "svets": "Svetslogg",
-    "weld": "Svetslogg",
-    "kontroll": "Kontrollrapport",
-    "inspection": "Kontrollrapport",
-    "provning": "Provningsprotokoll",
-    "test": "Provningsprotokoll",
-    "leverantör": "Leverantörsintyg",
-    "supplier": "Leverantörsintyg",
-    "kvalitet": "Kvalitetsintyg",
-    "quality": "Kvalitetsintyg",
+    "materialintyg": "Material Certificate",
+    "material": "Material Certificate",
+    "3.1": "Material Certificate",
+    "3.2": "Material Certificate",
+    "certifikat": "Certificate",
+    "certificate": "Certificate",
+    "svets": "Welding Log",
+    "weld": "Welding Log",
+    "kontroll": "Inspection Report",
+    "inspection": "Inspection Report",
+    "provning": "Test Protocol",
+    "test": "Test Protocol",
+    "leverantör": "Supplier Certificate",
+    "supplier": "Supplier Certificate",
+    "kvalitet": "Quality Certificate",
+    "quality": "Quality Certificate",
 }
 
 
@@ -40,8 +40,8 @@ def guess_certificate_type(filename: str) -> str:
         filename: Certificate filename (e.g., "materialintyg_2024.pdf")
 
     Returns:
-        Certificate type name (e.g., "Materialintyg")
-        Defaults to "Andra handlingar" if no match found
+        Certificate type name (e.g., "Material Certificate")
+        Defaults to "Other Documents" if no match found
     """
     filename_lower = filename.lower()
 
@@ -49,7 +49,7 @@ def guess_certificate_type(filename: str) -> str:
         if keyword in filename_lower:
             return cert_type
 
-    return "Andra handlingar"
+    return "Other Documents"
 
 
 def get_available_charges(

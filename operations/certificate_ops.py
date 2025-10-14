@@ -34,16 +34,16 @@ def guess_certificate_type(filename: str) -> str:
         filename: Certificate filename (e.g., "materialintyg_2024.pdf")
 
     Returns:
-        Certificate type name (e.g., "Materialintyg")
-        Defaults to "Andra handlingar" if no match found
+        Certificate type name (e.g., "Material Certificate")
+        Defaults to "Other Documents" if no match found
 
     Example:
         >>> guess_certificate_type("materialintyg_2024.pdf")
-        'Materialintyg'
+        'Material Certificate'
         >>> guess_certificate_type("svets_protokoll.pdf")
-        'Svetslogg'
+        'Welding Log'
         >>> guess_certificate_type("unknown.pdf")
-        'Andra handlingar'
+        'Other Documents'
     """
     return _guess_certificate_type(filename)
 

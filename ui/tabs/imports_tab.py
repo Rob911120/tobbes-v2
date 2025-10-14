@@ -14,7 +14,8 @@ try:
         QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
         QLabel, QGroupBox, QMessageBox, QFileDialog,
         QListWidget, QListWidgetItem, QProgressBar,
-        QTableWidget, QTableWidgetItem, QComboBox, QCheckBox
+        QTableWidget, QTableWidgetItem, QComboBox, QCheckBox,
+        QHeaderView
     )
     from PySide6.QtCore import Qt, Signal
     from PySide6.QtGui import QColor
@@ -171,6 +172,16 @@ class ImportsTab(QWidget):
         self.results_table.setHorizontalHeaderLabels([
             "Status", "Artikelnummer", "Benämning", "Tidigare → Nytt", "Verifierad", "Välj"
         ])
+
+        # Set column resize modes for better autosize
+        header = self.results_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Status - tight
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Artikelnummer - tight
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Benämning - stretch to fill
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Tidigare → Nytt - stretch to fill
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Verifierad - tight
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Välj - tight
+
         self.results_table.setVisible(False)
         results_layout.addWidget(self.results_table)
 
@@ -434,8 +445,18 @@ class ImportsTab(QWidget):
         self.results_status.setText(
             f"<span style='color: #28a745;'>🆕 {new_count} nya</span>, "
             f"<span style='color: #ffc107;'>📝 {updated_count} uppdaterade</span>, "
-            f"<span style='color: #dc3545;'>❌ {removed_count} borttagna</span>, "
+            f"<span style='color: #dc3545;'>❌ {removed_count} borttagna artiklar</span>, "
             f"<span style='color: #6c757d;'>{unchanged_count} oförändrade</span>"
+        )
+
+        # Add tooltip to explain the diff categories
+        self.results_status.setToolTip(
+            "🆕 Nya: Artiklar som inte fanns i projektet tidigare\n\n"
+            "📝 Uppdaterade: Artiklar med ändringar i nivå, quantity, charge eller batch.\n"
+            "   OBS! Charge-ändringar (även borttagning av charge) räknas här.\n\n"
+            "❌ Borttagna artiklar: Artiklar som finns i projektet men INTE i ny nivålista.\n"
+            "   Artiklar som helt tagits bort från nivålistan.\n\n"
+            "Oförändrade: Artiklar utan ändringar"
         )
 
         # Show table
