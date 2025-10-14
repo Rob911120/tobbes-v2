@@ -1,6 +1,6 @@
-# Tobbes v2 - Spårbarhetsguiden
+# Tobbes- Spårbarhetsguiden
 
-**Version 2.0** - Komplett ombyggnad med modulär arkitektur och database-first design.
+
 
 ## Vad är nytt i v2?
 
@@ -11,7 +11,7 @@
 - ✅ **Project updates** - Uppdatera projekt från ny data
 - ✅ **Custom certificate types** - Globala + projektspecifika
 - ✅ **Standalone .exe** med Nuitka (ingen Python-installation krävs)
-- ✅ **47% mindre kod** (16,000 → 8,500 rader)
+
 
 ## Snabbstart
 
@@ -40,7 +40,7 @@ python3 main.py
 ## Projektstruktur
 
 ```
-tobbes_v2/
+tobbes/
 ├── domain/              # Domain models och affärsregler
 │   ├── models.py       # Dataclasser (Project, Article, Certificate, etc.)
 │   ├── exceptions.py   # Custom exceptions

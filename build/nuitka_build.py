@@ -101,15 +101,24 @@ def main():
 
     # Platform-specific options
     if sys.platform == "win32":
-        cmd.extend([
+        windows_opts = [
             "--windows-disable-console",
-            "--windows-icon-from-ico=build/assets/app.ico",
             "--windows-company-name=FA-TEC",
             f"--windows-product-name={APP_NAME}",
             f"--windows-file-version={APP_VERSION}",
             f"--windows-product-version={APP_VERSION}",
-            "--windows-file-description=Spårbarhetsguide för materialcertifikat",
-        ])
+            "--windows-file-description=Sparbarhetsguide for materialcertifikat",
+        ]
+
+        # Add icon if file exists (optional)
+        icon_path = project_root / "build" / "assets" / "app.ico"
+        if icon_path.exists():
+            windows_opts.append(f"--windows-icon-from-ico={icon_path}")
+            print(f"✓ Using custom icon: {icon_path}")
+        else:
+            print(f"ℹ  No custom icon found, using default Python icon")
+
+        cmd.extend(windows_opts)
         output_name = "TobbesWizard.exe"
     elif sys.platform == "darwin":
         # macOS
