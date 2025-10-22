@@ -99,7 +99,7 @@ INSERT_PROJECT_ARTICLE = """
 
 SELECT_PROJECT_ARTICLES = """
     SELECT id, project_id, article_number, description, quantity,
-           level, parent_article, charge_number, batch_number, sort_order, created_at, updated_at
+           level, parent_article, charge_number, batch_number, verified, sort_order, created_at, updated_at
     FROM project_articles
     WHERE project_id = ?
     ORDER BY sort_order
@@ -116,6 +116,7 @@ SELECT_PROJECT_ARTICLES_WITH_GLOBAL = """
         pa.parent_article,
         pa.charge_number,
         pa.batch_number,
+        pa.verified,
         pa.sort_order,
         pa.created_at,
         pa.updated_at,
