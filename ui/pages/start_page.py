@@ -212,7 +212,10 @@ class StartPage(QWizardPage):
             # Load projects (default sort: newest first)
             projects = db.list_projects(limit=100, order_by="updated_at DESC")
 
-            self.projects_table.setRowCount(len(projects))
+            # Clear table completely before repopulating to avoid duplicates
+            self.projects_table.clearContents()  # Remove all cell content
+            self.projects_table.setRowCount(0)   # Reset to 0 rows
+            self.projects_table.setRowCount(len(projects))  # Set correct row count
 
             for row, project in enumerate(projects):
                 # Get statistics for verification count
