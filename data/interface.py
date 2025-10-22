@@ -33,7 +33,6 @@ class DatabaseInterface(ABC):
         customer: str,
         created_by: str,
         purchase_order_number: Optional[str] = None,
-        project_type: str = "Doc",
         description: Optional[str] = None,
         project_id: Optional[int] = None,
     ) -> int:
@@ -46,7 +45,6 @@ class DatabaseInterface(ABC):
             customer: Customer name
             created_by: Username of creator
             purchase_order_number: Purchase order number (Beställningsnummer)
-            project_type: Project type ("Doc" or "Ej Doc")
             description: Optional project description
             project_id: If provided, update existing project; otherwise create new
 
@@ -100,6 +98,18 @@ class DatabaseInterface(ABC):
 
         Returns:
             bool: True if deleted, False if project not found
+        """
+        pass
+
+    @abstractmethod
+    def get_distinct_customers(self) -> List[str]:
+        """
+        Get list of unique customer names from all projects.
+
+        Used for auto-complete suggestions when creating new projects.
+
+        Returns:
+            List of customer names, sorted alphabetically
         """
         pass
 
@@ -366,6 +376,42 @@ class DatabaseInterface(ABC):
 
         Returns:
             bool: True if successful
+        """
+        pass
+
+    @abstractmethod
+    def update_project_article(
+        self,
+        project_id: int,
+        article_number: str,
+        article_data: Dict[str, Any],
+    ) -> bool:
+        """
+        Update project article with multiple fields at once.
+
+        This is a general-purpose update method that can update any combination
+        of article fields including: quantity, charge_number, batch_number,
+        level, parent_article, sort_order, verified, etc.
+
+        Args:
+            project_id: The project ID
+            article_number: Article number to update
+            article_data: Dictionary with fields to update (only provided fields are updated)
+                - quantity: float
+                - charge_number: str
+                - batch_number: str
+                - level: str
+                - parent_article: str
+                - sort_order: int
+                - verified: bool
+                - description: str
+
+        Returns:
+            bool: True if successful
+
+        Raises:
+            NotFoundError: If article not found
+            DatabaseError: If update fails
         """
         pass
 
@@ -706,7 +752,24 @@ class DatabaseInterface(ABC):
         Returns:
             Dict containing:
             - total_articles: Total number of articles in project
-            - verified_articles: Number of articles with at least one certificate
+            - verified_articles: Number of articles marked as verified (verified=1)
+        """
+        pass
+
+    @abstractmethod
+    def get_project_content_count(self, project_id: int) -> Dict[str, int]:
+        """
+        Get count of articles and certificates for a project.
+
+        Used for confirmation dialogs when deleting projects.
+
+        Args:
+            project_id: The project ID
+
+        Returns:
+            Dict containing:
+            - articles: Number of articles in project
+            - certificates: Number of certificates in project
         """
         pass
 

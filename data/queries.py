@@ -12,20 +12,20 @@ throughout the codebase. This makes it easier to:
 
 INSERT_PROJECT = """
     INSERT INTO projects (project_name, order_number, customer, created_by, description,
-                         purchase_order_number, project_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+                         purchase_order_number)
+    VALUES (?, ?, ?, ?, ?, ?)
 """
 
 UPDATE_PROJECT = """
     UPDATE projects
     SET project_name = ?, order_number = ?, customer = ?, description = ?,
-        purchase_order_number = ?, project_type = ?
+        purchase_order_number = ?
     WHERE id = ?
 """
 
 SELECT_PROJECT_BY_ID = """
     SELECT id, project_name, order_number, customer, description,
-           purchase_order_number, project_type,
+           purchase_order_number,
            created_at, updated_at, created_by
     FROM projects
     WHERE id = ?
@@ -33,7 +33,7 @@ SELECT_PROJECT_BY_ID = """
 
 SELECT_ALL_PROJECTS = """
     SELECT id, project_name, order_number, customer, description,
-           purchase_order_number, project_type,
+           purchase_order_number,
            created_at, updated_at, created_by
     FROM projects
     ORDER BY {order_by}
@@ -42,6 +42,13 @@ SELECT_ALL_PROJECTS = """
 
 DELETE_PROJECT = """
     DELETE FROM projects WHERE id = ?
+"""
+
+SELECT_DISTINCT_CUSTOMERS = """
+    SELECT DISTINCT customer
+    FROM projects
+    WHERE customer IS NOT NULL AND customer != ''
+    ORDER BY customer
 """
 
 # ==================== Global Article Queries ====================
@@ -320,10 +327,14 @@ SELECT_MAX_PROJECT_SORT_ORDER = """
 
 SELECT_PROJECT_STATISTICS = """
     SELECT
-        COUNT(DISTINCT pa.article_number) AS total_articles,
-        COUNT(DISTINCT c.article_number) AS verified_articles
+        COUNT(*) AS total_articles,
+        SUM(pa.verified) AS verified_articles
     FROM project_articles pa
-    LEFT JOIN certificates c ON c.project_id = pa.project_id
-                             AND c.article_number = pa.article_number
     WHERE pa.project_id = ?
+"""
+
+COUNT_PROJECT_CONTENT = """
+    SELECT
+        (SELECT COUNT(*) FROM project_articles WHERE project_id = ?) as articles,
+        (SELECT COUNT(*) FROM certificates WHERE project_id = ?) as certificates
 """

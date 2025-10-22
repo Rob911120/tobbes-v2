@@ -400,9 +400,16 @@ class ArticlesTab(QWidget):
             article_number = article_data['article_number']
 
             # Save to database immediately
-            # TODO: Implement update_project_article in database interface
+            success = db.update_project_article(
+                project_id=project_id,
+                article_number=article_number,
+                article_data=article_data
+            )
 
-            logger.info(f"Saved article data for {article_number} to SQLite")
+            if success:
+                logger.info(f"Saved article data for {article_number} to SQLite")
+            else:
+                logger.warning(f"Failed to save article {article_number}")
 
             # Update status if verification changed
             self._update_status()

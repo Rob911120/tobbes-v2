@@ -130,7 +130,6 @@ class SQLiteDatabase(DatabaseInterface):
         customer: str,
         created_by: str,
         purchase_order_number: Optional[str] = None,
-        project_type: str = "Doc",
         description: Optional[str] = None,
         project_id: Optional[int] = None,
     ) -> int:
@@ -143,7 +142,7 @@ class SQLiteDatabase(DatabaseInterface):
                 cursor.execute(
                     Q.UPDATE_PROJECT,
                     (project_name, order_number, customer, description,
-                     purchase_order_number, project_type, project_id),
+                     purchase_order_number, project_id),
                 )
                 self.conn.commit()
                 return project_id
@@ -152,7 +151,7 @@ class SQLiteDatabase(DatabaseInterface):
                 cursor.execute(
                     Q.INSERT_PROJECT,
                     (project_name, order_number, customer, created_by, description,
-                     purchase_order_number, project_type),
+                     purchase_order_number),
                 )
                 new_project_id = cursor.lastrowid
                 self.conn.commit()
@@ -194,6 +193,13 @@ class SQLiteDatabase(DatabaseInterface):
         cursor.execute(Q.DELETE_PROJECT, (project_id,))
         self.conn.commit()
         return cursor.rowcount > 0
+
+    def get_distinct_customers(self) -> List[str]:
+        """Get list of unique customer names from all projects."""
+        cursor = self.conn.cursor()
+        cursor.execute(Q.SELECT_DISTINCT_CUSTOMERS)
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
 
     # ==================== Global Article Operations ====================
 
@@ -391,6 +397,61 @@ class SQLiteDatabase(DatabaseInterface):
         )
         self.conn.commit()
         return cursor.rowcount > 0
+
+    def update_project_article(
+        self,
+        project_id: int,
+        article_number: str,
+        article_data: Dict[str, Any],
+    ) -> bool:
+        """
+        Update project article with multiple fields at once.
+
+        Dynamically builds UPDATE query based on provided fields.
+        Only updates fields that are present in article_data.
+        """
+        if not article_data:
+            return False
+
+        # Allowed fields that can be updated
+        allowed_fields = {
+            'quantity', 'charge_number', 'batch_number', 'level',
+            'parent_article', 'sort_order', 'verified', 'description'
+        }
+
+        # Filter to only allowed fields
+        fields_to_update = {k: v for k, v in article_data.items() if k in allowed_fields}
+
+        if not fields_to_update:
+            logger.warning(f"No valid fields to update for article {article_number}")
+            return False
+
+        # Build dynamic UPDATE query
+        set_clauses = [f"{field} = ?" for field in fields_to_update.keys()]
+        sql = f"""
+            UPDATE project_articles
+            SET {', '.join(set_clauses)}
+            WHERE project_id = ? AND article_number = ?
+        """
+
+        # Build values list
+        values = list(fields_to_update.values()) + [project_id, article_number]
+
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(sql, values)
+            self.conn.commit()
+
+            if cursor.rowcount > 0:
+                logger.debug(f"Updated article {article_number} with fields: {list(fields_to_update.keys())}")
+                return True
+            else:
+                logger.warning(f"Article {article_number} not found in project {project_id}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to update article {article_number}: {e}")
+            raise DatabaseError(f"Failed to update article: {e}")
 
     def delete_project_article(
         self,
@@ -929,6 +990,16 @@ class SQLiteDatabase(DatabaseInterface):
                 "verified_articles": row["verified_articles"] or 0,
             }
         return {"total_articles": 0, "verified_articles": 0}
+
+    def get_project_content_count(self, project_id: int) -> Dict[str, int]:
+        """Get count of articles and certificates for a project."""
+        cursor = self.conn.cursor()
+        cursor.execute(Q.COUNT_PROJECT_CONTENT, (project_id, project_id))
+        row = cursor.fetchone()
+        return {
+            "articles": row[0] or 0,
+            "certificates": row[1] or 0,
+        }
 
     # ==================== Utility Operations ====================
 
