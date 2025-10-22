@@ -9,7 +9,7 @@ from pathlib import Path
 # ==================== Application Info ====================
 
 APP_NAME = "Tobbes - Spårbarhetsguiden"
-APP_VERSION = "1.16"
+APP_VERSION = "1.17"
 APP_ORGANIZATION = "FA-TEC"
 APP_AUTHOR = "Tobbes"
 
