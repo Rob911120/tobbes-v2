@@ -203,6 +203,8 @@ def populate_articles_with_certificates(
     This enriches article dicts with a 'certificates' field containing
     the list of certificates for each article.
 
+    OPTIMIZED: Fetches all certificates in ONE query instead of N queries (N+1 problem fix).
+
     Args:
         db: Database instance (injected)
         articles: List of article dicts (from get_articles_for_project)
@@ -219,14 +221,24 @@ def populate_articles_with_certificates(
     """
     logger.info(f"🔍 populate_articles_with_certificates: project_id={project_id}, {len(articles)} articles")
 
+    # OPTIMIZATION: Fetch ALL certificates for project in ONE query (instead of N queries)
+    all_certificates = db.get_certificates_for_project(project_id)
+    logger.debug(f"  Fetched {len(all_certificates)} total certificates in 1 query")
+
+    # Group certificates by article_number for fast lookup
+    cert_by_article = {}
+    for cert in all_certificates:
+        article_num = cert.get('article_number')
+        if article_num:
+            if article_num not in cert_by_article:
+                cert_by_article[article_num] = []
+            cert_by_article[article_num].append(cert)
+
+    # Assign certificates to each article
     for article in articles:
         article_number = article.get('article_number')
         if article_number:
-            # Fetch certificates for this article
-            certificates = db.get_certificates_for_article(
-                project_id=project_id,
-                article_number=article_number
-            )
+            certificates = cert_by_article.get(article_number, [])
             article['certificates'] = certificates
 
             # DEBUG: Log certificate details
